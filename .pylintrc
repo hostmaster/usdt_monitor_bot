@@ -1,0 +1,26 @@
+[BASIC]
+good-names=logger
+
+[MAIN]
+disable=
+    # Let isort handle this.
+    wrong-import-order,wrong-import-position,ungrouped-imports,
+    missing-module-docstring,
+    missing-function-docstring,
+    too-many-public-methods,
+    too-many-lines,
+    too-many-nested-blocks,
+    too-many-instance-attributes,
+    too-many-return-statements,
+    too-many-statements,
+    too-many-branches,
+    too-few-public-methods,
+    too-many-locals,
+    line-too-long,
+    too-many-arguments
+
+[FORMAT]
+max-line-length = 100
+
+# Allow single letter vars
+variable-rgx=[a-z_][a-z_0-9]*
