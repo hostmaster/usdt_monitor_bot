@@ -1,0 +1,12 @@
+[project]
+name = "crypto-wallet-tracker"
+version = "0.1.0"
+description = "Ethereum Addresses Tracker Bot"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiogram>=3.19.0",
+    "python-telegram-bot[job-queue]>=21.10",
+    "requests>=2.32.3",
+    "ruff>=0.9.7",
+]
