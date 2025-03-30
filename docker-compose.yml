@@ -6,7 +6,7 @@ services:
       context: .
       target: runtime
       args:
-        - PYTHON_VERSION=3.11
+        PYTHON_VERSION: "3.11"
     volumes:
       - db-data:/data
     secrets:
@@ -14,6 +14,12 @@ services:
       - tg_bot_token
       - tg_chat_id
       - wallet_address
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 secrets:
   etherscan_api_key:
@@ -27,3 +33,4 @@ secrets:
 
 volumes:
   db-data:
+    driver: local
