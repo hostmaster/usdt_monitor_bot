@@ -103,15 +103,17 @@ def is_new_tx(tx_hash: str) -> bool:
 
     Args:
         tx_hash (str): The transaction hash.
-    """
 
-    # TODO: Keeping only last X transactions
+    Returns:
+        bool: True if transaction is new, False if already processed
+    """
     with shelve.open("tx") as db:
-        if tx_hash in db:
+        is_new = tx_hash not in db
+        if not is_new:
             logger.debug(f"Transaction {tx_hash} already processed")
-            return False
-        db[tx_hash] = True
-        return True
+        else:
+            db[tx_hash] = True
+        return is_new
 
 
 def get_direction(transaction: dict, address: str) -> str:
@@ -120,15 +122,19 @@ def get_direction(transaction: dict, address: str) -> str:
     Args:
         transaction (dict): The transaction.
         address (str): The wallet address.
-    """
 
-    if transaction["from"].lower() == address.lower():
-        direction = "📤 Outgoing"
-    elif transaction["to"].lower() == address.lower():
-        direction = "📥 Incoming"
-    else:
-        direction = "Unknown"
-    return direction
+    Returns:
+        str: Direction of the transaction (Outgoing/Incoming/Unknown)
+    """
+    address = address.lower()
+    tx_from = transaction["from"].lower()
+    tx_to = transaction["to"].lower()
+
+    if tx_from == address:
+        return "📤 Outgoing"
+    if tx_to == address:
+        return "📥 Incoming"
+    return "Unknown"
 
 
 async def callback_minute(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -159,57 +165,81 @@ def read_docker_secret(secret_name: str) -> str:
     """Read secret from Docker secret file.
 
     Args:
-        secret_name (str): The secret name.
+        secret_name (str): Name of the secret file to read
+
+    Returns:
+        str: Contents of the secret file
+
+    Raises:
+        ValueError: If secret file is missing, inaccessible, or empty
+        OSError: If other OS-level errors occur reading the file
     """
+    from pathlib import Path
 
-    secret_path = f"/run/secrets/{secret_name}"
+    secret_path = Path("/run/secrets") / secret_name
     try:
-        with open(secret_path, "r", encoding="utf-8") as secret_file:
-            secret_value = secret_file.read().strip()
-            return secret_value
+        content = secret_path.read_text(encoding="utf-8").strip()
+        if not content:
+            logger.error(f"Secret '{secret_name}' is empty")
+            raise ValueError(f"Secret '{secret_name}' cannot be empty")
+        return content
     except FileNotFoundError:
-        logger.error(f"Secret '{secret_name}' not found.")
-        return None
+        logger.error(f"Secret '{secret_name}' not found")
+        raise ValueError(f"Required secret '{secret_name}' is missing")
+    except PermissionError:
+        logger.error(f"Permission denied reading secret '{secret_name}'")
+        raise ValueError(f"Cannot access secret '{secret_name}' - permission denied")
+    except OSError as e:
+        logger.error(f"OS error reading secret '{secret_name}': {e}")
+        raise OSError(f"Failed to read secret '{secret_name}': {e}")
+    except UnicodeDecodeError:
+        logger.error(f"Secret '{secret_name}' contains invalid UTF-8 data")
+        raise ValueError(f"Secret '{secret_name}' must contain valid UTF-8 text")
 
 
-def load_global_secrets() -> None:
-    """Load secrets from docker secrets.
+def setup_telegram_bot(tg_bot_token: str, tg_chat_id: str) -> Application:
+    """Set up and configure the Telegram bot application.
 
     Args:
-        None.
-    """
+        tg_bot_token (str): Telegram bot API token
+        tg_chat_id (str): Telegram chat ID for notifications
 
+    Returns:
+        Application: Configured Telegram bot application
+    """
+    application = Application.builder().token(tg_bot_token).build()
+
+    # Add command handlers
+    application.add_handler(CommandHandler(["start", "help"], start))
+
+    # Configure scheduled jobs
+    job_queue = application.job_queue
+    job_queue.run_repeating(callback_minute, interval=60, first=10, chat_id=tg_chat_id)
+
+    return application
+
+
+def load_secrets() -> tuple[str, str, str, str]:
+    """Load required secrets from Docker secrets.
+
+    Returns:
+        tuple: Contains etherscan_api_key, wallet_address, tg_chat_id, tg_bot_token
+    """
     global ETHERSCAN_API_KEY, WALLET_ADDRESS
     ETHERSCAN_API_KEY = read_docker_secret("etherscan_api_key")
     WALLET_ADDRESS = read_docker_secret("wallet_address")
-
+    tg_chat_id = read_docker_secret("tg_chat_id")
+    tg_bot_token = read_docker_secret("tg_bot_token")
+    return ETHERSCAN_API_KEY, WALLET_ADDRESS, tg_chat_id, tg_bot_token
 
 def main() -> None:
-    """Run bot.
-
-    Args:
-        None.
-    """
-
+    """Run the Telegram bot application."""
     try:
-        load_global_secrets()
-
-        tg_chat_id = read_docker_secret("tg_chat_id")
-        tg_bot_token = read_docker_secret("tg_bot_token")
-
-        # Create the Application and pass it your bot's token.
-        application = Application.builder().token(tg_bot_token).build()
-        job_queue = application.job_queue
-
-        # on different commands - answer in Telegram
-        application.add_handler(CommandHandler(["start", "help"], start))
-
-        job_queue.run_repeating(
-            callback_minute, interval=60, first=10, chat_id=tg_chat_id
-        )
-
-        # Run the bot until the user presses Ctrl-C
+        # Load secrets and start bot
+        _, _, tg_chat_id, tg_bot_token = load_secrets()
+        application = setup_telegram_bot(tg_bot_token, tg_chat_id)
         application.run_polling(allowed_updates=Update.ALL_TYPES)
+
     except (FileNotFoundError, RuntimeError, ValueError) as e:
         logger.error(f"An error occurred: {e}")
         sys.exit(1)
