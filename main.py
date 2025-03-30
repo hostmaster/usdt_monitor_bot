@@ -46,15 +46,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Hi! Let's get started!")
 
 
-def get_latest_tx(token: str, contract: str, address: str) -> dict:
+def get_latest_tx(token: str, contract: str, address: str) -> dict | None:
     """Get the latest transaction for a given address on ETH blockchain.
 
     Args:
         token (str): The Etherscan API key.
         contract (str): The contract address.
         address (str): The wallet address.
-    """
 
+    Returns:
+        dict | None: Latest transaction details if successful, None if error occurs
+    """
     url = "https://api.etherscan.io/api"
     params = {
         "module": "account",
@@ -62,7 +64,7 @@ def get_latest_tx(token: str, contract: str, address: str) -> dict:
         "contractaddress": contract,
         "address": address,
         "page": 1,
-        "offset": 10,
+        "offset": 1,  # We only need the latest transaction
         "startblock": 0,
         "endblock": 99999999,
         "sort": "desc",
@@ -73,29 +75,35 @@ def get_latest_tx(token: str, contract: str, address: str) -> dict:
         response = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
         response.raise_for_status()
 
-        response_json = response.json()
-        if "message" in response_json and response_json["message"] == "NOTOK":
-            raise RuntimeError(response.json())
         data = response.json()
+
+        # Check API response status
+        if data.get("status") != "1" or data.get("message") != "OK":
+            error_msg = data.get("result", "Unknown error")
+            logger.error(f"Etherscan API error: {error_msg}")
+            return None
+
         result = data.get("result", [])
+        if not result:
+            logger.info(f"No transactions found for address {address}")
+            return None
+
         return result[0]
 
     except HTTPError as http_e:
         logger.error(
             f"HTTP error fetching transactions for {address} on ETH blockchain: {http_e}"
         )
-        return None
-    except (
-        RequestException,
-        RuntimeError,
-    ) as e:
+    except RequestException as e:
         logger.error(
-            f"Error fetching transactions for {address} on ETH blockchain: {e}"
+            f"Network error fetching transactions for {address} on ETH blockchain: {e}"
         )
-        return None
-    except json.JSONDecodeError:
-        logger.error("Error decoding JSON response")
-        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON response: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error fetching transactions: {e}")
+
+    return None
 
 
 def is_new_tx(tx_hash: str) -> bool:
