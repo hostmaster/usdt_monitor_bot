@@ -29,20 +29,31 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-USDT_CONTRACT = "0xdac17f958d2ee523a2206206994597c13d831ec7"
-ETHERSCAN_API_KEY = None
-WALLET_ADDRESS = None
+USDT_CONTRACT = "0xdac17f958d2ee523a2206206994597c13d831ec7"  # USDT
+ETHERSCAN_API_KEY = None  # etherscan_api_key
+WALLET_ADDRESS = None  # wallet_address
 
-HTTP_TIMEOUT = 5
+HTTP_TIMEOUT = 5  # HTTP timeout
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends explanation on how to use the bot."""
+    """Sends explanation on how to use the bot.
+
+    Args:
+        update (Update): The update object.
+        context (ContextTypes.DEFAULT_TYPE): The context object.
+    """
     await update.message.reply_text("Hi! Let's get started!")
 
 
 def get_latest_tx(token: str, contract: str, address: str) -> dict:
-    """Get the latest transaction for a given address on ETH blockchain."""
+    """Get the latest transaction for a given address on ETH blockchain.
+
+    Args:
+        token (str): The Etherscan API key.
+        contract (str): The contract address.
+        address (str): The wallet address.
+    """
 
     url = "https://api.etherscan.io/api"
     params = {
@@ -88,7 +99,11 @@ def get_latest_tx(token: str, contract: str, address: str) -> dict:
 
 
 def is_new_tx(tx_hash: str) -> bool:
-    """Check if the transaction is new."""
+    """Check if the transaction is new.
+
+    Args:
+        tx_hash (str): The transaction hash.
+    """
 
     # TODO: Keeping only last X transactions
     with shelve.open("tx") as db:
@@ -100,7 +115,12 @@ def is_new_tx(tx_hash: str) -> bool:
 
 
 def get_direction(transaction: dict, address: str) -> str:
-    """Detect transaction direction."""
+    """Detect transaction direction.
+
+    Args:
+        transaction (dict): The transaction.
+        address (str): The wallet address.
+    """
 
     if transaction["from"].lower() == address.lower():
         direction = "📤 Outgoing"
@@ -112,7 +132,11 @@ def get_direction(transaction: dict, address: str) -> str:
 
 
 async def callback_minute(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Keep track of ETH transactions regularly."""
+    """Keep track of ETH transactions regularly.
+
+    Args:
+        context (ContextTypes.DEFAULT_TYPE): The context object.
+    """
 
     tx = get_latest_tx(
         token=ETHERSCAN_API_KEY, contract=USDT_CONTRACT, address=WALLET_ADDRESS
@@ -132,7 +156,12 @@ async def callback_minute(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def read_docker_secret(secret_name: str) -> str:
-    """Read secret from Docker secret file."""
+    """Read secret from Docker secret file.
+
+    Args:
+        secret_name (str): The secret name.
+    """
+
     secret_path = f"/run/secrets/{secret_name}"
     try:
         with open(secret_path, "r", encoding="utf-8") as secret_file:
@@ -144,7 +173,11 @@ def read_docker_secret(secret_name: str) -> str:
 
 
 def load_global_secrets() -> None:
-    """Load secrets from docker secrets."""
+    """Load secrets from docker secrets.
+
+    Args:
+        None.
+    """
 
     global ETHERSCAN_API_KEY, WALLET_ADDRESS
     ETHERSCAN_API_KEY = read_docker_secret("etherscan_api_key")
@@ -152,7 +185,12 @@ def load_global_secrets() -> None:
 
 
 def main() -> None:
-    """Run bot."""
+    """Run bot.
+
+    Args:
+        None.
+    """
+
     try:
         load_global_secrets()
 
@@ -178,6 +216,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    """Run the bot.
+
+    Args:
+        None.
+    """
+
     try:
         main()
     except KeyboardInterrupt:
