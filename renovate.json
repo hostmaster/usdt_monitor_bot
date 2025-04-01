@@ -1,0 +1,84 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base",
+    ":dependencyDashboard",
+    ":prHourlyLimit2",
+    ":prConcurrentLimit10",
+    ":semanticCommits",
+    ":semanticPrefixFix",
+    ":ignoreModulesAndTests",
+    ":autodetectPinVersions",
+    ":separateMultipleMajorReleases",
+    ":separatePatchReleases"
+  ],
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["^python$"],
+      "enabled": false
+    },
+    {
+      "matchPackagePatterns": ["^types-"],
+      "groupName": "type definitions",
+      "groupSlug": "types"
+    },
+    {
+      "matchPackagePatterns": ["^pytest-"],
+      "groupName": "pytest packages",
+      "groupSlug": "pytest"
+    },
+    {
+      "matchPackagePatterns": [
+        "^black$",
+        "^isort$",
+        "^flake8$",
+        "^mypy$",
+        "^pylint$"
+      ],
+      "groupName": "linting packages",
+      "groupSlug": "linting"
+    }
+  ],
+  "schedule": ["every weekend"],
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 10,
+  "labels": ["dependencies"],
+  "assignees": [],
+  "reviewers": [],
+  "stabilityDays": 3,
+  "internalChecksFilter": "strict",
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "extends": ["config:base"],
+    "packageRules": [
+      {
+        "matchPackagePatterns": ["*"],
+        "rangeStrategy": "pin"
+      }
+    ]
+  },
+  "postUpdateOptions": ["gomodTidy"],
+  "ignoreDeps": [],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/venv/**",
+    "**/.venv/**",
+    "**/env/**",
+    "**/.env/**"
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "assignees": [],
+    "reviewers": []
+  },
+  "python": {
+    "addLabels": ["python"],
+    "major": {
+      "addLabels": ["python-major"]
+    }
+  }
+}
