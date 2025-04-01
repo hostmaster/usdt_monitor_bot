@@ -159,9 +159,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-
-*.txt
+# IDE and editor files
 .direnv/
 .envrc
 .vscode/
 *.db
+
+# Text files to ignore (except requirements.txt)
+*.txt
+!requirements.txt
