@@ -25,7 +25,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov pylint bandit safety
+          pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
         run: |
@@ -51,11 +51,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pylint
+          pip install -r requirements-dev.txt
+
+      - name: Run black
+        run: |
+          black --check .
+
+      - name: Run isort
+        run: |
+          isort --check-only --diff .
+
+      - name: Run flake8
+        run: |
+          flake8 .
 
       - name: Run pylint
         run: |
           pylint main.py config.py api.py storage.py --fail-under=8.0
+
+      - name: Run mypy
+        run: |
+          mypy .
 
   security:
     runs-on: ubuntu-latest
@@ -71,7 +87,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install bandit safety
+          pip install -r requirements-dev.txt
 
       - name: Run bandit
         run: |
