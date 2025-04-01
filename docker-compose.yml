@@ -1,12 +1,14 @@
 services:
   tracker:
-    image: ghcr.io/hostmaster/crypto-wallet-tracker:latest
+    image: ${REGISTRY:-ghcr.io}/${REPOSITORY:-hostmaster/crypto-wallet-tracker}:${TAG:-latest}
     platform: linux/x86_64
     build:
       context: .
-      target: runtime
+      dockerfile: Dockerfile
+      target: ${TARGET:-runtime}
       args:
-        PYTHON_VERSION: "3.11"
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.11}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     volumes:
       - db-data:/data
     secrets:
@@ -20,6 +22,18 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  dev:
+    extends:
+      service: tracker
+    build:
+      target: development
+    volumes:
+      - .:/app
+      - db-data:/data
+    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "main.py"]
+    ports:
+      - "5678:5678"
 
 secrets:
   etherscan_api_key:
