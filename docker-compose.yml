@@ -1,50 +1,28 @@
+# docker-compose.yml
+
+version: "3.8"
+
 services:
-  tracker:
-    image: ${REGISTRY:-ghcr.io}/${REPOSITORY:-hostmaster/crypto-wallet-tracker}:${TAG:-latest}
-    platform: linux/x86_64
+  # Service to run the bot (uses the 'runner' stage)
+  telegram-bot:
     build:
       context: .
       dockerfile: Dockerfile
-      target: ${TARGET:-runtime}
-      args:
-        PYTHON_VERSION: ${PYTHON_VERSION:-3.11}
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      target: runner # Specify the target stage for the final image
+    image: usdt-monitor-bot:latest # Optional: name the runner image
+    container_name: usdt_monitor_bot
+
+    environment:
+      # Load from .env file or host environment
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
+      # Ensure Python sees the venv path (should be inherited from Dockerfile ENV)
+      # - PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
     volumes:
-      - db-data:/data
-    secrets:
-      - etherscan_api_key
-      - tg_bot_token
-      - tg_chat_id
-      - wallet_address
+      # Mount host data dir to /app/data inside the container
+      # The runner stage Dockerfile creates /app/data and sets permissions for appuser
+      - ./data:/app/data
+
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  dev:
-    extends:
-      service: tracker
-    build:
-      target: development
-    volumes:
-      - .:/app
-      - db-data:/data
-    command: ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "main.py"]
-    ports:
-      - "5678:5678"
-
-secrets:
-  etherscan_api_key:
-    file: ./etherscan_api_key.txt
-  tg_bot_token:
-    file: ./tg_bot_token.txt
-  tg_chat_id:
-    file: ./tg_chat_id.txt
-  wallet_address:
-    file: ./wallet_address.txt
-
-volumes:
-  db-data:
-    driver: local
+    # No command override needed, uses the CMD from the 'runner' stage

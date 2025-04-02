@@ -1,0 +1,35 @@
+# .dockerignore
+
+# Git files
+.git
+.gitignore
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local data directory (will be mounted as a volume)
+data/
+
+# Local secrets file (if using .env)
+.env
+
+# IDE / OS specific files
+.idea/
+.vscode/
+*.swp
+*~
+*.bak
+Thumbs.db

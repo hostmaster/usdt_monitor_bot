@@ -1,91 +1,62 @@
-# syntax = docker/dockerfile:1.4
+# Dockerfile (Multi-Stage)
 
-ARG PYTHON_VERSION
+#--------------------------------------------------------------------------
+# Stage 1: Base image with Python and Virtual Environment setup
+#--------------------------------------------------------------------------
+FROM python:3.11-slim AS base
 
-### Base image
-FROM python:${PYTHON_VERSION}-slim-bookworm AS base
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+# Set path for virtual environment
+ENV VENV_PATH=/opt/venv
 
-# Set environment variables
-ENV APP_HOME=/app \
-    VIRTUAL_ENV=/venv \
-    PYTHONPATH=/app \
-    PATH=/venv/bin:$PATH \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Create virtual environment
+RUN python -m venv $VENV_PATH
+# Add venv bin directory to the path
+ENV PATH="$VENV_PATH/bin:$PATH"
 
-# Create non-root user
-RUN adduser --system --group app
+WORKDIR /app
 
-### Development dependencies
-FROM base AS development-deps
+#--------------------------------------------------------------------------
+# Stage 2: Install runtime dependencies into the virtual environment
+#--------------------------------------------------------------------------
+FROM base AS builder
 
-# Install development tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies if necessary (e.g., for C extensions)
+# RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 
-### Build python dependencies
-FROM development-deps AS builder
+# Copy requirements and install runtime dependencies into the venv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-WORKDIR $APP_HOME
+#--------------------------------------------------------------------------
+# Stage 3: Runner Stage - Final lightweight image for running the bot
+#--------------------------------------------------------------------------
+FROM base AS runner
+# Inherits Python and base venv structure from 'base'
 
-# Copy only requirements file first to leverage Docker cache
-COPY requirements.txt ./
+# Copy the populated virtual environment from the 'builder' stage
+COPY --from=builder $VENV_PATH $VENV_PATH
 
-# Create venv and install dependencies
-RUN python -m venv /venv && \
-    pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy only the necessary application code (adjust if you have more .py files)
+# Assumes your main logic is in usdt_monitor_bot.py
+COPY usdt_monitor_bot.py .
 
-### Development image
-FROM development-deps AS development
+# Set the working directory (already set in 'base', but good to be explicit)
+WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /venv /venv
+# 1. Create the non-root user and group first
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
-# Set up application
-WORKDIR $APP_HOME
-COPY . .
+# 2. Create the data directory mount point placeholder and change ownership
+#    Do this *after* the user exists. Also set WORKDIR ownership.
+RUN mkdir -p /app/data && chown appuser:appgroup /app /app/data && chmod 755 /app /app/data
+# Optional: Ensure /app itself is writable by the user if needed,
+# but generally owning /app/data is sufficient. chown on /app helps if
+# the script tries writing temporary files in WORKDIR.
 
-# Switch to non-root user
-USER app
+# 3. Switch to the non-root user
+USER appuser
 
-# Run the application in development mode
-CMD ["python", "main.py"]
-
-### Test image
-FROM development AS test
-
-# Switch back to root for test setup
-USER root
-
-# Install test dependencies
-RUN pip install --no-cache-dir pytest pytest-asyncio pytest-cov
-
-# Switch back to non-root user
-USER app
-
-# Run tests
-CMD ["pytest", "--cov=.", "--cov-report=term-missing"]
-
-### Production runtime
-FROM base AS runtime
-
-# Copy virtual environment from builder
-COPY --from=builder /venv /venv
-
-# Set up application
-WORKDIR $APP_HOME
-COPY main.py ./
-
-# Record git commit for versioning
-ARG GIT_COMMIT=unspecified
-RUN echo $GIT_COMMIT > "$APP_HOME/git_version"
-
-# Switch to non-root user
-USER app
-
-# Run the application
-CMD ["python", "main.py"]
+# Command to run the application
+CMD ["python", "usdt_monitor_bot.py"]

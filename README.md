@@ -1,93 +1,62 @@
-# Ethereum Address Tracker Bot
+# USDT Monitor Bot
 
-A powerful Telegram bot that provides real-time monitoring and notifications for Ethereum wallet activities. This bot helps users track their Ethereum addresses, monitor transactions, and stay updated with balance changes through instant Telegram notifications.
+A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) transactions and notifies users when they receive USDT.
 
 ## Features
 
-- 🔔 Real-time transaction notifications
-- 💰 Balance tracking and updates
-- 📊 Transaction history monitoring
-- 🔒 Secure and private - no wallet access required
-- ⚡ Instant notifications via Telegram
-- 🎯 Support for multiple wallet addresses
-- 📱 User-friendly Telegram interface
+- Monitor multiple Ethereum addresses for incoming USDT transactions
+- Real-time notifications when USDT is received
+- Simple command interface via Telegram
+- Persistent storage of user preferences and wallet addresses
+- Dockerized deployment for easy setup
 
-## Use Cases
+## Commands
 
-- Monitor your own Ethereum wallets
-- Track specific addresses of interest
-- Get notified about incoming/outgoing transactions
-- Keep track of wallet balances
-- Monitor multiple addresses simultaneously
+- `/start` - Start interaction with the bot
+- `/help` - Show available commands
+- `/add_wallet <eth_address>` - Add an Ethereum address to monitor for incoming USDT
+- `/list_wallets` - List all addresses you're currently monitoring
+- `/remove_wallet <eth_address>` - Stop monitoring a specific address
 
-## Quick Start
+## How It Works
 
-1. Clone the repository:
-```bash
-git clone https://github.com/hostmaster/crypto-wallet-tracker.git
-cd crypto-wallet-tracker
-```
+The bot periodically checks the Etherscan API for new USDT transactions to the monitored addresses. When a new incoming transaction is detected, it sends a notification to all users tracking that address.
 
-2. Set up your environment:
-```bash
-# Create secret files with your values
-echo "your-etherscan-api-key" > etherscan_api_key.txt
-echo "your-telegram-bot-token" > tg_bot_token.txt
-echo "your-telegram-chat-id" > tg_chat_id.txt
-echo "your-wallet-address" > wallet_address.txt
-```
+## Requirements
 
-3. Start the bot:
-```bash
-docker compose up -d
-```
+- Python 3.11+
+- Docker and Docker Compose (for containerized deployment)
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- Etherscan API Key (from [Etherscan](https://etherscan.io/apis))
 
-## Documentation
+## Environment Variables
 
-- [Build and Deployment Guide](BUILD.md) - Detailed instructions for building, testing, and deploying
-- [Development Guide](docs/DEVELOPMENT.md) - Guide for developers
-- [API Documentation](docs/API.md) - API reference and examples
-- [Configuration Guide](docs/CONFIGURATION.md) - Configuration options and examples
+- `BOT_TOKEN` - Your Telegram bot token
+- `ETHERSCAN_API_KEY` - Your Etherscan API key
 
-## Technical Details
+## Local Development
 
-The bot connects to the Ethereum network through reliable APIs and provides real-time updates through Telegram's messaging platform. It's designed to be efficient, secure, and easy to use.
+1. Clone the repository
+2. Create a `.env` file with your environment variables
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+4. Run the bot:
+   ```
+   python usdt_monitor_bot.py
+   ```
 
-### Architecture
+## Docker Deployment
 
-- Python-based Telegram bot
-- Docker containerization
-- Multi-stage builds for optimized images
-- Secure secret management
-- Automated deployment pipeline
-
-### Security Features
-
-- Non-root container user
-- Minimal runtime image
-- Secure secret handling
-- Network isolation
-- Regular security updates
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+See [DEPLOY.md](DEPLOY.md) for detailed deployment instructions using Docker.
 
 ## License
 
-This project is licensed under the CC0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the terms of the license included in the repository.
 
-## Disclaimer
+## Acknowledgements
 
-This bot is provided for educational purposes only and should not be used for financial advice. The bot has no access to your wallet.
-
-## Support
-
-For issues and support:
-1. Check the [GitHub Issues](https://github.com/hostmaster/crypto-wallet-tracker/issues)
-2. Review the [Documentation](https://github.com/hostmaster/crypto-wallet-tracker/wiki)
-3. Contact the maintainers
+- [Etherscan API](https://etherscan.io/apis) for blockchain data
+- [Aiogram](https://docs.aiogram.dev/) for the Telegram bot framework
+- [APScheduler](https://apscheduler.readthedocs.io/) for scheduling tasks

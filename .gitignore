@@ -168,3 +168,4 @@ cython_debug/
 # Text files to ignore (except requirements.txt)
 *.txt
 !requirements.txt
+.env

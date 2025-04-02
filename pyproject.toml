@@ -1,48 +1,91 @@
+# pyproject.toml
+
+# Build system configuration (PEP 518)
+[build-system]
+requires = ["setuptools>=61.0"] # Specify minimum setuptools version needed
+build-backend = "setuptools.build_meta" # The backend used to build the package (standard for setuptools)
+
+# Project metadata (PEP 621)
 [project]
-name = "crypto-wallet-tracker"
-version = "0.1.0"
-description = "Ethereum Addresses Tracker Bot"
-readme = "README.md"
-requires-python = ">=3.13"
+name = "usdt-monitor-bot" # Replace with your desired project name (use hyphens)
+version = "0.1.0" # Initial version
+description = "Telegram bot to monitor specified Ethereum addresses for incoming USDT transactions using Etherscan API."
+readme = "README.md" # Assuming you have or will create a README file
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }, # Replace with your details
+]
+license = { text = "MIT" } # Or specify file = "LICENSE" if you have a LICENSE file
+requires-python = ">=3.9" # Based on usage of asyncio.to_thread
+classifiers = [ # Standard classifiers for PyPI (optional but good practice)
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Internet",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "crypto", "monitoring"]
+
+# Project dependencies (runtime)
+# NOTE: Keep this in sync with requirements.txt if using both,
+# especially for Docker builds relying on requirements.txt.
 dependencies = [
-    "aiogram>=3.19.0",
-    "python-telegram-bot[job-queue]>=21.10",
-    "requests>=2.32.3",
-    "ruff>=0.9.7",
+    "aiogram>=3.0.0",      # Core bot framework
+    "aiohttp>=3.8.0",      # For async HTTP requests (Etherscan)
+    "apscheduler>=3.9.0",  # For scheduled tasks (monitoring job)
+    "python-dotenv>=0.20" # Optional: For loading .env file locally (good practice)
 ]
 
-[tool.black]
-line-length = 100
-target-version = ['py39']
-include = '\.pyi?$'
-extend-exclude = '''
-# A regex preceded with ^/ will apply only to files and directories
-# in the root of the project.
-^/docs
-'''
+# Optional dependencies (for development, testing, etc.)
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.18.0",
+    "pytest-mock>=3.7.0",
+]
+dev = [
+    "usdt-monitor-bot[test]", # Include test dependencies in dev
+    "black>=23.0",           # Code formatter (optional)
+    "ruff>=0.1.0",           # Linter (optional)
+    # Add other development tools here
+]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-line_length = 100
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
-known_first_party = ["crypto_wallet_tracker"]
-known_third_party = ["telegram", "pydantic", "requests"]
+# Project URLs (optional)
+[project.urls]
+Homepage = "https://github.com/your_username/usdt-monitor-bot" # Replace with your repo URL
+Repository = "https://github.com/your_username/usdt-monitor-bot"
+# Bug-Tracker = "https://github.com/your_username/usdt-monitor-bot/issues"
 
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_optional = true
+# --- Tool Configurations ---
+
+# Pytest configuration (replaces pytest.ini)
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = [ # Directory where tests are located
+    "tests",
+]
+python_files = "test_*.py" # Pattern for test files
+# Add options you would normally use on the command line
+# -v: verbose, -ra: show extra test summary info for all except passes
+addopts = "-v -ra --strict-markers"
+asyncio_mode = "auto" # Enable asyncio support via pytest-asyncio
+
+# Ruff linter configuration (optional, example)
+# [tool.ruff]
+# line-length = 88
+# select = ["E", "W", "F", "I", "UP"] # Select error codes (E/W=pycodestyle, F=pyflakes, I=isort, UP=pyupgrade)
+# ignore = []
+# exclude = [".venv", "venv", ".git", "__pycache__"]
+
+# Black code formatter configuration (optional, example)
+# [tool.black]
+# line-length = 88
+# target-version = ['py39', 'py310', 'py311'] # Specify target Python versions
