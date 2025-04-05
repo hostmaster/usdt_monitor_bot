@@ -19,4 +19,4 @@ RUN addgroup --system appgroup && \
     chmod 755 /app /app/data
 USER appuser
 
-CMD ["python", "usdt_monitor_bot/main.py"]
+CMD ["python", "-m", "usdt_monitor_bot.main"]

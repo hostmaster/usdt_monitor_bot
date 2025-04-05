@@ -1,7 +1,7 @@
 # main.py
 import asyncio
-import datetime
 import logging
+from datetime import datetime
 
 import aiohttp
 from aiogram import Bot, Dispatcher
