@@ -36,9 +36,11 @@ class NotificationService:
             token_decimal = int(
                 tx.get(
                     "tokenDecimal",
-                    self._config.usdt_decimals
-                    if token_type == "USDT" # nosec
-                    else self._config.usdc_decimals,
+                    (
+                        self._config.usdt_decimals
+                        if token_type == "USDT"  # nosec
+                        else self._config.usdc_decimals
+                    ),
                 )
             )
             value_smallest_unit = Decimal(tx["value"])
