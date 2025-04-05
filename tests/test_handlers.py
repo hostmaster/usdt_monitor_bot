@@ -12,6 +12,7 @@ INVALID_ADDRESS = "0xinvalid"
 VALID_ADDRESS_UPPER = "0x1234567890ABCDEF1234567890ABCDEF12345678"
 
 # Import handlers now
+# ruff: noqa: E402
 from usdt_monitor_bot.handlers import (
     add_wallet_handler,
     command_help_handler,
