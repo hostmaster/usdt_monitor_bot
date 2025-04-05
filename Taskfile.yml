@@ -11,12 +11,17 @@ tasks:
     cmds:
       - docker build --platform linux/amd64 -t {{.IMAGE}}:{{.TAG}} .
 
+  tag-stable:
+    desc: Tag Docker image as stable
+    cmds:
+      - docker tag {{.IMAGE}}:{{.TAG}} {{.IMAGE}}:stable
+
   push:
     desc: Push Docker image to GitHub Container Registry
     cmds:
       - echo "{{.CR_PAT}}" | docker login ghcr.io -u hostmaster --password-stdin
       - docker push {{.IMAGE}}:{{.TAG}}
-
+      - docker push {{.IMAGE}}:stable
   all:
     desc: Build and push Docker image
     cmds:
