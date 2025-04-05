@@ -1,0 +1,32 @@
+---
+name: Security
+
+on:
+  push:
+    paths:
+      - "**.py"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          pip install bandit safety
+      - name: Run Bandit
+        run: |
+          bandit -r usdt_monitor_bot/
+      - name: Check dependencies for known vulnerabilities
+        run: |
+          safety check
