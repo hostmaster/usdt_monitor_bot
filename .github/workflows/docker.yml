@@ -50,7 +50,6 @@ jobs:
         with:
           context: .
           push: true
-          target: runtime
           build-args: |
             PYTHON_VERSION=${{ env.PYTHON_VERSION }}
             GIT_COMMIT=${{ env.GIT_COMMIT }}
