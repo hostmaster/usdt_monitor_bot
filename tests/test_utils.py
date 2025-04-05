@@ -60,8 +60,8 @@ def test_address_validation():
 def test_format_usdt_message_success(
     notifier_formatter: NotificationService,
 ):
-    formatted_message = notifier_formatter._format_usdt_message(
-        MONITORED_ADDRESS, SAMPLE_TX
+    formatted_message = notifier_formatter._format_token_message(
+        MONITORED_ADDRESS, SAMPLE_TX, "USDT"
     )
     assert "New Incoming USDT Transfer!" in formatted_message
     assert f"To Address: <code>{MONITORED_ADDRESS}</code>" in formatted_message
@@ -80,8 +80,8 @@ def test_format_usdt_message_missing_key(
     invalid_tx = SAMPLE_TX.copy()
     tx_hash = invalid_tx["hash"]
     del invalid_tx["value"]
-    formatted_message = notifier_formatter._format_usdt_message(
-        MONITORED_ADDRESS, invalid_tx
+    formatted_message = notifier_formatter._format_token_message(
+        MONITORED_ADDRESS, invalid_tx, "USDT"
     )
     assert formatted_message.startswith("⚠️ Error formatting transaction")
     assert f"⚠️ Error formatting transaction {tx_hash}" in formatted_message

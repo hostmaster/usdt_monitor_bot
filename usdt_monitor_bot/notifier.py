@@ -25,15 +25,24 @@ class NotificationService:
         self._config = config
         logging.info("NotificationService initialized.")
 
-    def _format_usdt_message(self, monitored_address: str, tx: Dict[str, Any]) -> str:
-        """Formats the notification message for an incoming USDT transaction."""
+    def _format_token_message(
+        self, monitored_address: str, tx: Dict[str, Any], token_type: str
+    ) -> str:
+        """Formats the notification message for an incoming token transaction."""
         try:
             tx_hash = tx["hash"]
             from_addr = tx["from"]
             # Use provided decimal or default, handle potential missing key robustly
-            token_decimal = int(tx.get("tokenDecimal", self._config.usdt_decimals))
+            token_decimal = int(
+                tx.get(
+                    "tokenDecimal",
+                    self._config.usdt_decimals
+                    if token_type == "USDT"
+                    else self._config.usdc_decimals,
+                )
+            )
             value_smallest_unit = Decimal(tx["value"])
-            value_usdt = value_smallest_unit / (Decimal(10) ** token_decimal)
+            value_token = value_smallest_unit / (Decimal(10) ** token_decimal)
 
             tx_time_ts = int(tx["timeStamp"])
             tx_datetime = datetime.fromtimestamp(tx_time_ts).strftime(
@@ -42,10 +51,10 @@ class NotificationService:
             etherscan_link = f"https://etherscan.io/tx/{tx_hash}"
 
             # Format amount with commas and correct decimal places
-            amount_str = f"{value_usdt:,.{token_decimal}f} USDT"
+            amount_str = f"{value_token:,.{token_decimal}f} {token_type}"
 
             message_text = (
-                f"🔔 {hbold('New Incoming USDT Transfer!')}\n\n"
+                f"🔔 {hbold(f'New Incoming {token_type} Transfer!')}\n\n"
                 f"💰 To Address: {hcode(monitored_address)}\n"
                 f"💵 Amount: {hbold(amount_str)}\n"
                 f"➡️ From: {hcode(from_addr)}\n"
@@ -62,11 +71,17 @@ class NotificationService:
             )
             return f"⚠️ Error formatting transaction {tx.get('hash', 'N/A')}."
 
-    async def send_usdt_notification(
-        self, user_id: int, monitored_address: str, tx_data: Dict[str, Any]
+    async def send_token_notification(
+        self,
+        user_id: int,
+        monitored_address: str,
+        tx_data: Dict[str, Any],
+        token_type: str,
     ):
-        """Sends a formatted USDT transaction notification to a user."""
-        message_text = self._format_usdt_message(monitored_address, tx_data)
+        """Sends a formatted token transaction notification to a user."""
+        message_text = self._format_token_message(
+            monitored_address, tx_data, token_type
+        )
         if message_text.startswith("⚠️"):  # Don't send malformed messages
             logging.warning(
                 f"Skipping notification to {user_id} due to formatting error for tx {tx_data.get('hash')}"
@@ -81,7 +96,7 @@ class NotificationService:
                 disable_web_page_preview=True,
             )
             logging.debug(
-                f"Sent USDT notification to {user_id} for tx {tx_data['hash']}"
+                f"Sent {token_type} notification to {user_id} for tx {tx_data['hash']}"
             )
             await asyncio.sleep(0.1)  # Small delay between sends
         except TelegramRetryAfter as e:
@@ -107,5 +122,5 @@ class NotificationService:
             )
         except Exception as e:
             logging.error(
-                f"Unexpected error sending USDT notification to user {user_id}: {e}"
+                f"Unexpected error sending {token_type} notification to user {user_id}: {e}"
             )

@@ -17,16 +17,19 @@ os.makedirs(DATA_DIR, exist_ok=True)
 class BotConfig:
     bot_token: str
     etherscan_api_key: str
-    database_file: str = os.path.join(DATA_DIR, "users_usdt_monitor.db")
+    database_file: str = os.path.join(DATA_DIR, "users_token_monitor.db")
     etherscan_api_url: str = "https://api.etherscan.io/api"
     usdt_contract_address: str = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    usdc_contract_address: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
     usdt_decimals: int = 6
+    usdc_decimals: int = 6
     check_interval_seconds: int = 30
     etherscan_request_delay: float = 1.1  # Delay between Etherscan API calls
     etherscan_timeout_seconds: int = 30
 
     # Derived constants
     USDT_DECIMAL_PLACES: Decimal = Decimal(10) ** usdt_decimals
+    USDC_DECIMAL_PLACES: Decimal = Decimal(10) ** usdc_decimals
 
 
 def load_config() -> BotConfig:

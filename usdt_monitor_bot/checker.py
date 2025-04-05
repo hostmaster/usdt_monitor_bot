@@ -16,7 +16,7 @@ from usdt_monitor_bot.notifier import NotificationService
 
 
 class TransactionChecker:
-    """Periodically checks for new USDT transactions for monitored addresses."""
+    """Periodically checks for new USDT and USDC transactions for monitored addresses."""
 
     def __init__(
         self,
@@ -56,11 +56,16 @@ class TransactionChecker:
                     f"Checking address {address_lower} from block {query_start_block}"
                 )
 
-                transactions = await self._etherscan.get_usdt_token_transactions(
+                # Check both USDT and USDC transactions
+                usdt_transactions = await self._etherscan.get_usdt_token_transactions(
+                    address_lower, start_block=query_start_block
+                )
+                usdc_transactions = await self._etherscan.get_usdc_token_transactions(
                     address_lower, start_block=query_start_block
                 )
 
-                if not transactions:
+                all_transactions = usdt_transactions + usdc_transactions
+                if not all_transactions:
                     # No new transactions found via API, keep last checked block as is
                     # We only update if transactions *were* processed successfully up to a certain block
                     latest_block_processed[address_lower] = (
@@ -74,12 +79,12 @@ class TransactionChecker:
                 user_ids = await self._db.get_users_for_address(address_lower)
                 if not user_ids:
                     logging.warning(
-                        f"Found {len(transactions)} transactions for {address_lower}, but no users are tracking it. Skipping notification."
+                        f"Found {len(all_transactions)} transactions for {address_lower}, but no users are tracking it. Skipping notification."
                     )
                     # Still need to update the last checked block if txs were found
                     current_max_block_for_addr = max(
                         int(tx["blockNumber"])
-                        for tx in transactions
+                        for tx in all_transactions
                         if tx.get("blockNumber")
                     )
                     latest_block_processed[address_lower] = max(
@@ -88,29 +93,35 @@ class TransactionChecker:
                     continue
 
                 logging.info(
-                    f"Processing {len(transactions)} potential new tx(s) involving {address_lower}"
+                    f"Processing {len(all_transactions)} potential new tx(s) involving {address_lower}"
                 )
 
                 current_max_block_for_addr = start_block
                 notifications_sent = 0
-                for tx in transactions:
+                for tx in all_transactions:
                     try:
                         tx_block = int(tx["blockNumber"])
                         # Although we query from start_block+1, Etherscan might rarely include the boundary block. Double-check.
                         if tx_block <= start_block:
                             continue
 
-                        # Check if it's an *incoming* USDT transaction for the monitored address
+                        # Check if it's an *incoming* token transaction for the monitored address
                         is_incoming_usdt = (
                             tx.get("contractAddress", "").lower()
                             == self._config.usdt_contract_address.lower()
                             and tx.get("to", "").lower() == address_lower
                         )
+                        is_incoming_usdc = (
+                            tx.get("contractAddress", "").lower()
+                            == self._config.usdc_contract_address.lower()
+                            and tx.get("to", "").lower() == address_lower
+                        )
 
-                        if is_incoming_usdt:
+                        if is_incoming_usdt or is_incoming_usdc:
+                            token_type = "USDT" if is_incoming_usdt else "USDC"
                             for user_id in user_ids:
-                                await self._notifier.send_usdt_notification(
-                                    user_id, address_lower, tx
+                                await self._notifier.send_token_notification(
+                                    user_id, address_lower, tx, token_type
                                 )
                                 notifications_sent += 1
 
