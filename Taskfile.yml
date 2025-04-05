@@ -1,7 +1,7 @@
 version: "3"
 
 vars:
-  IMAGE: ghcr.io/hostmaster/crypto-wallet-tracker
+  IMAGE: ghcr.io/hostmaster/usdt_monitor_bot
   TAG:
     sh: git rev-parse --short HEAD
 

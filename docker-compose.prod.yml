@@ -1,6 +1,6 @@
 services:
   telegram-bot:
-    image: ghcr.io/hostmaster/crypto-wallet-tracker:stable
+    image: ghcr.io/hostmaster/usdt_monitor_bot:stable
     env_file: [.env]
     volumes: [data:/app/data]
     restart: unless-stopped
