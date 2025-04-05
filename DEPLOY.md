@@ -12,7 +12,9 @@ This guide provides detailed instructions for deploying the USDT Monitor Bot usi
 
 1. Create a `.env` file in the project root with the following content:
 
-```
+```sh
+# .env
+# Replace with your actual tokens
 BOT_TOKEN=your_telegram_bot_token_here
 ETHERSCAN_API_KEY=your_etherscan_api_key_here
 ```
@@ -30,10 +32,11 @@ docker compose up -d
 ```
 
 This will:
+
 - Build the Docker image using the Dockerfile
 - Create a container named `usdt_monitor_bot`
 - Start the bot in the background
-- Mount the `./data` directory to persist the database
+- Mount the data volume to persist the database
 
 2. Check the logs to ensure the bot is running correctly:
 
@@ -61,8 +64,8 @@ docker build -t usdt-monitor-bot .
 docker run -d \
   --name usdt_monitor_bot \
   --restart unless-stopped \
-  -v $(pwd)/data:/app/data \
   --env-file .env \
+  -v usdt_monitor_bot_data:/app/data \
   usdt-monitor-bot
 ```
 
@@ -101,10 +104,10 @@ docker compose up -d
 
 ### Database Issues
 
-If you encounter database-related issues, you can reset the database by removing the data directory:
+If you encounter database-related issues, you can reset the database by removing the volume:
 
 ```bash
-rm -rf ./data
+docker compose down -v
 ```
 
 Then restart the container. A new database will be created automatically.
@@ -125,9 +128,9 @@ This will show you any errors or issues that might be occurring.
 
 ## Security Considerations
 
-- The bot runs as a non-root user inside the container for security
+- The bot runs as a non-root user (`appuser`) inside the container for security
 - API keys are stored in environment variables and not hardcoded
-- The database is stored in a volume that persists between container restarts
+- The database is stored in a Docker volume that persists between container restarts
 - Consider using Docker secrets or a secure environment variable management solution for production deployments
 
 ## Production Deployment
