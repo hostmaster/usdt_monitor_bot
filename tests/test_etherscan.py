@@ -71,7 +71,7 @@ class MockClientSession:
         self._response = None
 
     async def __aenter__(self):
-        return self
+        return self._response
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self._closed = True
@@ -79,12 +79,6 @@ class MockClientSession:
     def get(self, *args, **kwargs):
         """Return a context manager that yields the response."""
         return self
-
-    async def __aenter__(self):
-        return self._response
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass
 
     def set_response(self, response):
         """Set the response to be returned by the context manager."""
