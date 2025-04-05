@@ -1,28 +1,14 @@
-# docker-compose.yml
-
-version: "3.8"
-
 services:
-  # Service to run the bot (uses the 'runner' stage)
   telegram-bot:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runner # Specify the target stage for the final image
-    image: usdt-monitor-bot:latest # Optional: name the runner image
     container_name: usdt_monitor_bot
-
-    environment:
-      # Load from .env file or host environment
-      - BOT_TOKEN=${BOT_TOKEN}
-      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY}
-      # Ensure Python sees the venv path (should be inherited from Dockerfile ENV)
-      # - PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
+    env_file:
+      - .env
     volumes:
-      # Mount host data dir to /app/data inside the container
-      # The runner stage Dockerfile creates /app/data and sets permissions for appuser
-      - ./data:/app/data
-
+      - data:/app/data
     restart: unless-stopped
-    # No command override needed, uses the CMD from the 'runner' stage
+
+volumes:
+  data:

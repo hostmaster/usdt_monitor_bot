@@ -1,0 +1,44 @@
+version: "3"
+
+vars:
+  IMAGE: ghcr.io/hostmaster/crypto-wallet-tracker
+  TAG:
+    sh: git rev-parse --short HEAD
+
+tasks:
+  build:
+    desc: Build Docker image
+    cmds:
+      - docker build --platform linux/amd64 -t {{.IMAGE}}:{{.TAG}} .
+
+  push:
+    desc: Push Docker image to GitHub Container Registry
+    cmds:
+      - echo "{{.CR_PAT}}" | docker login ghcr.io -u hostmaster --password-stdin
+      - docker push {{.IMAGE}}:{{.TAG}}
+
+  all:
+    desc: Build and push Docker image
+    cmds:
+      - task: build
+      - task: push
+
+  run:
+    desc: Run Docker container
+    cmds:
+      - docker compose up
+    depends:
+      - build
+
+  deploy:
+    desc: Deploy Docker container
+    cmds:
+      - task: build
+      - task: push
+      - task: sync
+
+  sync:
+    desc: Sync Docker container to server
+    cmds:
+      - rsync -va -z .env $TARGET_HOST:tracker/
+      - rsync -va -z docker-compose.prod.yml $TARGET_HOST:tracker/compose.yaml

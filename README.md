@@ -14,9 +14,9 @@ A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) trans
 
 - `/start` - Start interaction with the bot
 - `/help` - Show available commands
-- `/add_wallet <eth_address>` - Add an Ethereum address to monitor for incoming USDT
-- `/list_wallets` - List all addresses you're currently monitoring
-- `/remove_wallet <eth_address>` - Stop monitoring a specific address
+- `/add <eth_address>` - Add an Ethereum address to monitor for incoming USDT
+- `/list` - List all addresses you're currently monitoring
+- `/remove <eth_address>` - Stop monitoring a specific address
 
 ## How It Works
 

@@ -77,6 +77,8 @@ python_files = "test_*.py" # Pattern for test files
 # -v: verbose, -ra: show extra test summary info for all except passes
 addopts = "-v -ra --strict-markers"
 asyncio_mode = "auto" # Enable asyncio support via pytest-asyncio
+# Explicitly set the default loop scope for async fixtures
+asyncio_default_fixture_loop_scope = "function"
 
 # Ruff linter configuration (optional, example)
 # [tool.ruff]
@@ -89,3 +91,6 @@ asyncio_mode = "auto" # Enable asyncio support via pytest-asyncio
 # [tool.black]
 # line-length = 88
 # target-version = ['py39', 'py310', 'py311'] # Specify target Python versions
+
+[tool.pyright]
+typeCheckingMode = "off"

@@ -1,0 +1,13 @@
+services:
+  telegram-bot:
+    image: ghcr.io/hostmaster/crypto-wallet-tracker:stable
+    env_file: [.env]
+    volumes: [data:/app/data]
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+volumes:
+  data:
