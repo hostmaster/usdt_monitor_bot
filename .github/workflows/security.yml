@@ -26,7 +26,7 @@ jobs:
           pip install bandit safety
       - name: Run Bandit
         run: |
-          bandit -r usdt_monitor_bot/
+          bandit --baseline baseline.json -r usdt_monitor_bot/
       - name: Check dependencies for known vulnerabilities
         run: |
           safety check

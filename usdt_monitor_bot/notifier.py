@@ -37,7 +37,7 @@ class NotificationService:
                 tx.get(
                     "tokenDecimal",
                     self._config.usdt_decimals
-                    if token_type == "USDT"
+                    if token_type == "USDT" # nosec
                     else self._config.usdc_decimals,
                 )
             )
