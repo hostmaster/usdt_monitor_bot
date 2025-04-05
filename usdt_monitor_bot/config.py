@@ -39,6 +39,11 @@ class BotConfig:
             os.getenv("ETHERSCAN_REQUEST_DELAY", "0.2")
         )  # Delay between requests in seconds
 
+        # Check interval settings
+        self.check_interval_seconds: int = int(
+            os.getenv("CHECK_INTERVAL_SECONDS", "60")
+        )  # Default to 60 seconds
+
         # Initialize token registry
         self.token_registry = TokenRegistry()
 
@@ -93,24 +98,17 @@ def load_config() -> BotConfig:
     load_dotenv()  # Load .env file if present
 
     try:
-        bot_token = os.environ["BOT_TOKEN"]
+        bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
         etherscan_api_key = os.environ["ETHERSCAN_API_KEY"]
     except KeyError as e:
         logging.error(f"!!! Environment variable {e} not found!")
         sys.exit(f"Environment variable {e} not configured. Exiting.")
 
-    # Optional overrides from environment
-    check_interval = int(
-        os.environ.get("CHECK_INTERVAL_SECONDS", BotConfig.check_interval_seconds)
-    )
-    request_delay = float(
-        os.environ.get("ETHERSCAN_REQUEST_DELAY", BotConfig.etherscan_request_delay)
-    )
+    # Create config instance
+    config = BotConfig()
 
-    return BotConfig(
-        bot_token=bot_token,
-        etherscan_api_key=etherscan_api_key,
-        check_interval_seconds=check_interval,
-        etherscan_request_delay=request_delay,
-        # Other fields use defaults from the dataclass definition
-    )
+    # Override check interval if specified
+    if "CHECK_INTERVAL_SECONDS" in os.environ:
+        config.check_interval_seconds = int(os.environ["CHECK_INTERVAL_SECONDS"])
+
+    return config

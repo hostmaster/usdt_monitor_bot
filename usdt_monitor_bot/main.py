@@ -40,14 +40,14 @@ async def main() -> None:
     logging.info("Configuration loaded.")
 
     # 3. Initialize Database
-    db_manager = DatabaseManager(db_path=config.database_file)
+    db_manager = DatabaseManager(db_path=config.db_path)
     if not await db_manager.init_db():
         logging.critical("Database initialization failed. Exiting.")
         return  # Or raise an exception
 
     # 4. Initialize Bot and Dispatcher
     bot = Bot(
-        token=config.bot_token,
+        token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
@@ -58,14 +58,7 @@ async def main() -> None:
         logging.info("Aiohttp ClientSession created.")
 
         # 6. Initialize Services (Clients, Notifier, Checker)
-        etherscan_client = EtherscanClient(
-            session=session,
-            api_key=config.etherscan_api_key,
-            api_url=config.etherscan_api_url,
-            usdt_contract=config.usdt_contract_address,
-            usdc_contract=config.usdc_contract_address,
-            timeout=config.etherscan_timeout_seconds,
-        )
+        etherscan_client = EtherscanClient(config=config)
         notifier = NotificationService(bot=bot, config=config)
         transaction_checker = TransactionChecker(
             config=config,
