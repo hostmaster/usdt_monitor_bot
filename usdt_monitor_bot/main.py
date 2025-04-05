@@ -63,6 +63,7 @@ async def main() -> None:
             api_key=config.etherscan_api_key,
             api_url=config.etherscan_api_url,
             usdt_contract=config.usdt_contract_address,
+            usdc_contract=config.usdc_contract_address,
             timeout=config.etherscan_timeout_seconds,
         )
         notifier = NotificationService(bot=bot, config=config)

@@ -26,20 +26,26 @@ class EtherscanClient:
         api_key: str,
         api_url: str,
         usdt_contract: str,
+        usdc_contract: str,
         timeout: int,
     ):
         self._session = session
         self._api_key = api_key
         self._api_url = api_url
         self._usdt_contract = usdt_contract
+        self._usdc_contract = usdc_contract
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         logging.info("EtherscanClient initialized.")
 
-    async def get_usdt_token_transactions(
-        self, address: str, start_block: int = 0, end_block: int = 99999999
+    async def get_token_transactions(
+        self,
+        address: str,
+        contract_address: str,
+        start_block: int = 0,
+        end_block: int = 99999999,
     ) -> List[Dict[str, Any]]:
         """
-        Fetches USDT token transactions for a given address from a specific block.
+        Fetches token transactions for a given address and contract from a specific block.
 
         Returns:
             List of transaction dictionaries if successful.
@@ -52,7 +58,7 @@ class EtherscanClient:
         params = {
             "module": "account",
             "action": "tokentx",
-            "contractaddress": self._usdt_contract,
+            "contractaddress": contract_address,
             "address": address,
             "startblock": start_block,
             "endblock": end_block,
@@ -92,7 +98,7 @@ class EtherscanClient:
                     )  # Sometimes error details are in result
                     if "no transactions found" in message:
                         logging.debug(
-                            f"No new USDT transactions found for {address} since block {start_block} (API Message)."
+                            f"No new token transactions found for {address} since block {start_block} (API Message)."
                         )
                         return []  # Return empty list, not an error
                     elif (
@@ -119,3 +125,19 @@ class EtherscanClient:
             # Re-raise as a generic ClientError or specific EtherscanError if desired
             raise EtherscanError(f"HTTP Error {e.status}: {e.message}") from e
         # TimeoutError and other ClientErrors are implicitly raised
+
+    async def get_usdt_token_transactions(
+        self, address: str, start_block: int = 0, end_block: int = 99999999
+    ) -> List[Dict[str, Any]]:
+        """Wrapper for USDT transactions."""
+        return await self.get_token_transactions(
+            address, self._usdt_contract, start_block, end_block
+        )
+
+    async def get_usdc_token_transactions(
+        self, address: str, start_block: int = 0, end_block: int = 99999999
+    ) -> List[Dict[str, Any]]:
+        """Wrapper for USDC transactions."""
+        return await self.get_token_transactions(
+            address, self._usdc_contract, start_block, end_block
+        )
