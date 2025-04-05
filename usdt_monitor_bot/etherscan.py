@@ -29,7 +29,19 @@ class EtherscanClient:
         self._base_url = config.etherscan_base_url
         self._api_key = config.etherscan_api_key
         self._timeout = ClientTimeout(total=30)  # 30 seconds timeout
+        self._session = None
         logging.info("EtherscanClient initialized.")
+
+    async def __aenter__(self):
+        """Create a new session when entering the context."""
+        self._session = aiohttp.ClientSession(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Close the session when exiting the context."""
+        if self._session:
+            await self._session.close()
+            self._session = None
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
@@ -49,6 +61,9 @@ class EtherscanClient:
             EtherscanRateLimitError: If the API rate limit is exceeded
             EtherscanError: For other API errors
         """
+        if not self._session:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+
         params = {
             "module": "account",
             "action": "tokentx",
@@ -61,24 +76,23 @@ class EtherscanClient:
         }
 
         try:
-            async with aiohttp.ClientSession(timeout=self._timeout) as session:
-                async with session.get(self._base_url, params=params) as response:
-                    if response.status == 429:  # Too Many Requests
-                        raise EtherscanRateLimitError("Rate limit exceeded")
+            async with self._session.get(self._base_url, params=params) as response:
+                if response.status == 429:  # Too Many Requests
+                    raise EtherscanRateLimitError("Rate limit exceeded")
 
-                    if response.status != 200:
-                        raise EtherscanError(
-                            f"API request failed with status {response.status}"
-                        )
+                if response.status != 200:
+                    raise EtherscanError(
+                        f"API request failed with status {response.status}"
+                    )
 
-                    data = await response.json()
-                    if data.get("status") != "1":
-                        message = data.get("message", "Unknown error")
-                        if "rate limit" in message.lower():
-                            raise EtherscanRateLimitError(message)
-                        raise EtherscanError(f"API error: {message}")
+                data = await response.json()
+                if data.get("status") != "1":
+                    message = data.get("message", "Unknown error")
+                    if "rate limit" in message.lower():
+                        raise EtherscanRateLimitError(message)
+                    raise EtherscanError(f"API error: {message}")
 
-                    return data.get("result", [])
+                return data.get("result", [])
 
         except aiohttp.ClientError as e:
             raise EtherscanError(f"Network error: {e}") from e
@@ -86,3 +100,9 @@ class EtherscanClient:
             raise EtherscanError(f"Request timeout: {e}") from e
         except ValueError as e:
             raise EtherscanError(f"Invalid JSON response: {e}") from e
+
+    async def close(self):
+        """Close the session if it exists."""
+        if self._session:
+            await self._session.close()
+            self._session = None
