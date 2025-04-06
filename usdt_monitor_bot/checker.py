@@ -73,6 +73,14 @@ class TransactionChecker:
                         )
                         continue
                     except EtherscanError as e:
+                        # Check if this is a "No transactions found" response
+                        if "No transactions found" in str(e):
+                            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                                logging.debug(
+                                    f"No {token.symbol} transactions found for {address_lower} "
+                                    f"from block {query_start_block}"
+                                )
+                            continue
                         logging.error(
                             f"Error checking {token.symbol} transactions for {address_lower}: {e}"
                         )
@@ -118,7 +126,7 @@ class TransactionChecker:
                             continue
 
                         # Get token configuration for this transaction
-                        token_config = self._config.get_token_by_address(
+                        token_config = self._config.token_registry.get_token_by_address(
                             tx.get("contractAddress", "")
                         )
                         if not token_config:
@@ -131,7 +139,7 @@ class TransactionChecker:
                         if tx.get("to", "").lower() == address_lower:
                             for user_id in user_ids:
                                 await self._notifier.send_token_notification(
-                                    user_id, address_lower, tx, token_config.symbol
+                                    user_id, tx, token_config.symbol
                                 )
                                 notifications_sent += 1
 

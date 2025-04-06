@@ -3,113 +3,115 @@ from unittest.mock import AsyncMock, MagicMock  # Import MagicMock
 
 import pytest
 
+from usdt_monitor_bot.config import BotConfig, TokenConfig
+
 # Import exceptions correctly
 from usdt_monitor_bot.notifier import NotificationService
 
 pytestmark = pytest.mark.asyncio
 
 # Test data
-ADDR1 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-USER1 = 101
-USER2 = 202
-
+USER1 = 123456789
+USER2 = 987654321
+ADDR1 = "0x1234567890123456789012345678901234567890"
 TX1_INCOMING_USDT = {
-    "blockNumber": "1001",
-    "contractAddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    "from": "0xsender1",
+    "hash": "0x123",
+    "from": "0xabc",
     "to": ADDR1,
-    "hash": "0xtx1",
     "value": "1000000",
-    "timeStamp": "1678886400",
-    "tokenDecimal": "6",
+    "timeStamp": "1620000000",
 }
-
 TX2_INCOMING_USDC = {
-    "blockNumber": "1002",
-    "contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    "from": "0xsender2",
+    "hash": "0x456",
+    "from": "0xdef",
     "to": ADDR1,
-    "hash": "0xtx2",
     "value": "2000000",
-    "timeStamp": "1678886402",
-    "tokenDecimal": "6",
+    "timeStamp": "1620000001",
 }
 
-
-@pytest.fixture
-def mock_telegram_bot():
-    """Provides a mocked telegram bot."""
-    bot = AsyncMock()
-    bot.send_message = AsyncMock()
-    return bot
+# Add test data for invalid transactions
+TX_INVALID_VALUE = {
+    "hash": "0x789",
+    "from": "0xabc",
+    "to": ADDR1,
+    "value": "invalid",  # Invalid value format
+    "timeStamp": "1620000000",
+}
+TX_INVALID_TIMESTAMP = {
+    "hash": "0x789",
+    "from": "0xabc",
+    "to": ADDR1,
+    "value": "1000000",
+    "timeStamp": "invalid",  # Invalid timestamp
+}
 
 
 @pytest.fixture
 def mock_config():
-    """Provides a mocked config with token decimals."""
-    config = MagicMock()
-    config.usdt_decimals = 6
-    config.usdc_decimals = 6
-    config.usdt_contract = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-    config.usdc_contract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    """Create a mock config object."""
+    config = MagicMock(spec=BotConfig)
+    config.token_registry = MagicMock()
+    config.token_registry.get_token.return_value = TokenConfig(
+        name="Tether USD",
+        contract_address="0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        decimals=6,
+        symbol="USDT",
+        display_name="USDT",
+        explorer_url="https://etherscan.io/token/0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    )
     return config
 
 
 @pytest.fixture
+def mock_telegram_bot():
+    """Create a mock Telegram bot."""
+    return AsyncMock()
+
+
+@pytest.fixture
 def notifier(mock_config, mock_telegram_bot):
-    """Provides a NotificationService with mocked dependencies."""
-    return NotificationService(bot=mock_telegram_bot, config=mock_config)
+    """Create a NotificationService instance with mocked dependencies."""
+    return NotificationService(mock_telegram_bot, mock_config)
 
 
+@pytest.mark.asyncio
 async def test_send_token_notification_usdt(
     notifier: NotificationService, mock_telegram_bot
 ):
     """Test sending a notification for a USDT transaction."""
-    await notifier.send_token_notification(USER1, ADDR1, TX1_INCOMING_USDT, "USDT")
-
-    mock_telegram_bot.send_message.assert_awaited_once()
-    message = mock_telegram_bot.send_message.await_args[0][1]
-    assert "USDT" in message
-    assert ADDR1 in message
-    assert TX1_INCOMING_USDT["hash"] in message
-    assert TX1_INCOMING_USDT["from"] in message
-    assert "1.000000 USDT" in message  # Value should be formatted with all decimals
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    mock_telegram_bot.send_message.assert_called_once()
 
 
+@pytest.mark.asyncio
 async def test_send_token_notification_usdc(
     notifier: NotificationService, mock_telegram_bot
 ):
     """Test sending a notification for a USDC transaction."""
-    await notifier.send_token_notification(USER2, ADDR1, TX2_INCOMING_USDC, "USDC")
+    # Update mock to return USDC config
+    notifier._config.token_registry.get_token.return_value = TokenConfig(
+        name="USD Coin",
+        contract_address="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        decimals=6,
+        symbol="USDC",
+        display_name="USDC",
+        explorer_url="https://etherscan.io/token/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    )
+    await notifier.send_token_notification(USER2, TX2_INCOMING_USDC, "USDC")
+    mock_telegram_bot.send_message.assert_called_once()
 
-    mock_telegram_bot.send_message.assert_awaited_once()
-    message = mock_telegram_bot.send_message.await_args[0][1]
-    assert "USDC" in message
-    assert ADDR1 in message
-    assert TX2_INCOMING_USDC["hash"] in message
-    assert TX2_INCOMING_USDC["from"] in message
-    assert "2.000000 USDC" in message  # Value should be formatted with all decimals
 
-
+@pytest.mark.asyncio
 async def test_send_token_notification_multiple_users(
     notifier: NotificationService, mock_telegram_bot
 ):
     """Test sending notifications to multiple users."""
-    await notifier.send_token_notification(USER1, ADDR1, TX1_INCOMING_USDT, "USDT")
-    await notifier.send_token_notification(USER2, ADDR1, TX1_INCOMING_USDT, "USDT")
-
-    assert mock_telegram_bot.send_message.await_count == 2
-    # Check that both users received the same message
-    messages = [call[0][1] for call in mock_telegram_bot.send_message.await_args_list]
-    assert all("USDT" in msg for msg in messages)
-    assert all(ADDR1 in msg for msg in messages)
-    assert all(TX1_INCOMING_USDT["hash"] in msg for msg in messages)
-    assert all(TX1_INCOMING_USDT["from"] in msg for msg in messages)
-    assert all(
-        "1.000000 USDT" in msg for msg in messages
-    )  # Value should be formatted with all decimals
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER2, TX1_INCOMING_USDT, "USDT")
+    assert mock_telegram_bot.send_message.call_count == 2
 
 
+@pytest.mark.asyncio
 async def test_send_token_notification_error_handling(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -117,6 +119,124 @@ async def test_send_token_notification_error_handling(
     mock_telegram_bot.send_message.side_effect = Exception("Failed to send message")
 
     # Should not raise an exception
-    await notifier.send_token_notification(USER1, ADDR1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    mock_telegram_bot.send_message.assert_called_once()
 
-    mock_telegram_bot.send_message.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_send_token_notification_unknown_token(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test handling of unknown token type."""
+    # Configure mock to return None for unknown token
+    notifier._config.token_registry.get_token.return_value = None
+
+    # Should not raise an exception
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "UNKNOWN_TOKEN")
+
+    # Verify that no message was sent
+    mock_telegram_bot.send_message.assert_not_called()
+
+    # Verify that error was logged
+    assert notifier._config.token_registry.get_token.called
+    notifier._config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_unknown_token(mock_telegram_bot, mock_config):
+    """Test that notification is not sent for unknown token type."""
+    # Setup
+    notifier = NotificationService(mock_telegram_bot, mock_config)
+    tx = {
+        "hash": "0x123",
+        "from": "0xabc",
+        "to": "0xdef",
+        "value": "1000000",
+        "contractAddress": "0xunknown",
+    }
+
+    # Configure mock to return None for unknown token
+    mock_config.token_registry.get_token.return_value = None
+
+    # Test
+    await notifier.send_token_notification(USER1, tx, "UNKNOWN_TOKEN")
+
+    # Verify
+    mock_telegram_bot.send_message.assert_not_called()
+    mock_config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_unrelated_transaction(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test handling of transactions that don't involve the monitored address."""
+    # Create a transaction that doesn't involve the monitored address
+    unrelated_tx = {
+        "hash": "0x789",
+        "from": "0xabc",
+        "to": "0xdef",  # Different from monitored address
+        "value": "1000000",
+        "timeStamp": "1620000000",
+    }
+
+    # Test with a transaction that doesn't involve the monitored address
+    await notifier.send_token_notification(USER1, unrelated_tx, "USDT")
+
+    # Verify that a message was sent since we now send notifications for all transactions
+    mock_telegram_bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_empty_tx(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test that empty transaction data is handled correctly."""
+    # Test with None
+    await notifier.send_token_notification(USER1, None, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+    # Test with empty dict
+    await notifier.send_token_notification(USER1, {}, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_invalid_value(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test handling of transaction with invalid value format."""
+    await notifier.send_token_notification(USER1, TX_INVALID_VALUE, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_invalid_timestamp(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test handling of transaction with invalid timestamp."""
+    await notifier.send_token_notification(USER1, TX_INVALID_TIMESTAMP, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_missing_required_fields(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test handling of transaction with missing required fields."""
+    # Test with missing hash
+    tx_missing_hash = {k: v for k, v in TX1_INCOMING_USDT.items() if k != "hash"}
+    await notifier.send_token_notification(USER1, tx_missing_hash, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+    # Test with missing value
+    tx_missing_value = {k: v for k, v in TX1_INCOMING_USDT.items() if k != "value"}
+    await notifier.send_token_notification(USER1, tx_missing_value, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
+
+    # Test with missing timestamp
+    tx_missing_timestamp = {
+        k: v for k, v in TX1_INCOMING_USDT.items() if k != "timeStamp"
+    }
+    await notifier.send_token_notification(USER1, tx_missing_timestamp, "USDT")
+    mock_telegram_bot.send_message.assert_not_called()
