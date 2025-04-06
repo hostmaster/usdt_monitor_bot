@@ -137,7 +137,8 @@ This will show you any errors or issues that might be occurring.
 
 For production deployments, consider:
 
-1. Using a reverse proxy (like Nginx) in front of the bot
-2. Setting up monitoring and alerting
-3. Implementing backup strategies for the database
-4. Using a container orchestration system like Kubernetes for high availability
+1. Setting up monitoring and alerting for the bot's health and performance
+2. Implementing backup strategies for the database
+3. Using a container orchestration system like Kubernetes for high availability
+4. Configuring proper logging and log rotation
+5. Setting up proper error monitoring and alerting

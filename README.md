@@ -13,6 +13,9 @@ A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) trans
 - Dockerized deployment for easy setup
 - Configurable notification settings
 - Support for multiple users and addresses
+- Robust transaction age filtering with boundary case handling
+- Comprehensive test coverage with async support
+- Detailed logging for debugging and monitoring
 
 ## Commands
 
