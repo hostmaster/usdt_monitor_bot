@@ -461,3 +461,161 @@ async def test_no_transactions_after_filtering(
     # Verify that the last checked block was updated
     mock_etherscan.get_token_transactions.assert_called()
     mock_db.update_last_checked_block.assert_called()
+
+
+async def test_transaction_age_boundary_handling(
+    checker, mock_db, mock_etherscan, mock_notifier, mock_config
+):
+    """Test that transactions exactly at the age boundary are included."""
+    # Create transactions with timestamps exactly at the boundary
+    now = datetime.now(timezone.utc)
+    boundary_age = timedelta(days=mock_config.max_transaction_age_days)
+    boundary_tx = {
+        "blockNumber": str(BLOCK_ADDR1_START + 1),
+        "timeStamp": str(int((now - boundary_age).timestamp())),
+        "hash": "0x000003e9",
+        "from": "0xsender",
+        "to": ADDR1,
+        "value": "1000000",
+        "contractAddress": USDT_CONTRACT,
+    }
+    just_old_tx = {
+        "blockNumber": str(BLOCK_ADDR1_START + 2),
+        "timeStamp": str(int((now - boundary_age - timedelta(seconds=1)).timestamp())),
+        "hash": "0x000003ea",
+        "from": "0xsender",
+        "to": ADDR1,
+        "value": "1000000",
+        "contractAddress": USDT_CONTRACT,
+    }
+
+    # Setup mock to return both transactions
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan.get_token_transactions.side_effect = [
+        [boundary_tx, just_old_tx],  # USDT transactions
+        [],  # USDC transactions
+    ]
+    mock_db.get_users_for_address.return_value = [USER1]
+
+    # Run the checker
+    await checker.check_all_addresses()
+
+    # Verify that only the boundary transaction was processed
+    await mock_notifier.send_token_notification.assert_awaited_once_with(
+        USER1, boundary_tx, "USDT"
+    )
+
+
+async def test_transaction_count_boundary_handling(
+    checker, mock_db, mock_etherscan, mock_notifier, mock_config
+):
+    """Test that exactly max_transactions_per_check transactions are processed."""
+    # Create exactly max_transactions_per_check + 1 transactions
+    now = datetime.now(timezone.utc)
+    transactions = []
+    for i in range(mock_config.max_transactions_per_check + 1):
+        tx = {
+            "blockNumber": str(BLOCK_ADDR1_START + i + 1),
+            "timeStamp": str(int((now - timedelta(hours=i)).timestamp())),
+            "hash": f"0x{i:08x}",
+            "from": "0xsender",
+            "to": ADDR1,
+            "value": "1000000",
+            "contractAddress": USDT_CONTRACT,
+        }
+        transactions.append(tx)
+
+    # Sort transactions by block number in ascending order
+    transactions.sort(key=lambda x: int(x["blockNumber"]))
+
+    # Setup mock to return all transactions
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan.get_token_transactions.side_effect = [
+        transactions,  # USDT transactions
+        [],  # USDC transactions
+    ]
+    mock_db.get_users_for_address.return_value = [USER1]
+
+    # Run the checker
+    await checker.check_all_addresses()
+
+    # Verify that exactly max_transactions_per_check transactions were processed
+    assert (
+        mock_notifier.send_token_notification.await_count
+        == mock_config.max_transactions_per_check
+    )
+
+    # Verify that transactions were processed in order from newest to oldest
+    calls = mock_notifier.send_token_notification.await_args_list
+    for i, call in enumerate(calls):
+        # The newest transaction has the highest index
+        expected_index = mock_config.max_transactions_per_check - i
+        assert call.args[1]["hash"] == f"0x{expected_index:08x}"
+
+
+async def test_transaction_filtering_combined_boundaries(
+    checker, mock_db, mock_etherscan, mock_notifier, mock_config
+):
+    """Test that both age and count boundaries work together correctly."""
+    # Create a mix of old and recent transactions
+    now = datetime.now(timezone.utc)
+    boundary_age = timedelta(days=mock_config.max_transaction_age_days)
+    transactions = []
+
+    # Add some old transactions
+    for i in range(3):
+        tx = {
+            "blockNumber": str(BLOCK_ADDR1_START + i + 1),
+            "timeStamp": str(
+                int((now - boundary_age - timedelta(days=i + 1)).timestamp())
+            ),
+            "hash": f"0xold{i:08x}",
+            "from": "0xsender",
+            "to": ADDR1,
+            "value": "1000000",
+            "contractAddress": USDT_CONTRACT,
+        }
+        transactions.append(tx)
+
+    # Add more recent transactions than max_transactions_per_check
+    for i in range(mock_config.max_transactions_per_check + 2):
+        tx = {
+            "blockNumber": str(BLOCK_ADDR1_START + i + 4),
+            "timeStamp": str(int((now - timedelta(hours=i)).timestamp())),
+            "hash": f"0xnew{i:08x}",
+            "from": "0xsender",
+            "to": ADDR1,
+            "value": "1000000",
+            "contractAddress": USDT_CONTRACT,
+        }
+        transactions.append(tx)
+
+    # Sort transactions by block number in ascending order
+    transactions.sort(key=lambda x: int(x["blockNumber"]))
+
+    # Setup mock to return all transactions
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan.get_token_transactions.side_effect = [
+        transactions,  # USDT transactions
+        [],  # USDC transactions
+    ]
+    mock_db.get_users_for_address.return_value = [USER1]
+
+    # Run the checker
+    await checker.check_all_addresses()
+
+    # Verify that exactly max_transactions_per_check recent transactions were processed
+    assert (
+        mock_notifier.send_token_notification.await_count
+        == mock_config.max_transactions_per_check
+    )
+
+    # Verify that only recent transactions were processed (none of the old ones)
+    calls = mock_notifier.send_token_notification.await_args_list
+    for i, call in enumerate(calls):
+        # The newest transaction has the highest index
+        expected_index = mock_config.max_transactions_per_check + 1 - i
+        assert call.args[1]["hash"] == f"0xnew{expected_index:08x}"
