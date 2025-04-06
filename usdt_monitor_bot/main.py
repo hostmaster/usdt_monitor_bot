@@ -3,7 +3,6 @@ import asyncio
 import logging
 from datetime import datetime
 
-import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -53,50 +52,43 @@ async def main() -> None:
     dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
     logging.info("Aiogram Bot and Dispatcher initialized.")
 
-    # 5. Setup Network Client (aiohttp session)
-    async with aiohttp.ClientSession() as session:
-        logging.info("Aiohttp ClientSession created.")
+    # 5. Initialize Services (Clients, Notifier, Checker)
+    etherscan_client = EtherscanClient(config=config)
+    notifier = NotificationService(bot=bot, config=config)
+    transaction_checker = TransactionChecker(
+        config=config,
+        db_manager=db_manager,
+        etherscan_client=etherscan_client,
+        notifier=notifier,
+    )
 
-        # 6. Initialize Services (Clients, Notifier, Checker)
-        etherscan_client = EtherscanClient(config=config)
-        notifier = NotificationService(bot=bot, config=config)
-        transaction_checker = TransactionChecker(
-            config=config,
-            db_manager=db_manager,
-            etherscan_client=etherscan_client,
-            notifier=notifier,
-        )
+    # 6. Register Handlers
+    register_handlers(dp, db_manager)  # db_manager already passed to Dispatcher
 
-        # 7. Register Handlers
-        # Pass necessary dependencies to the registration function
-        register_handlers(dp, db_manager)  # db_manager already passed to Dispatcher
+    # 7. Setup and Start Scheduler
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        transaction_checker.check_all_addresses,
+        "interval",
+        seconds=config.check_interval_seconds,
+        next_run_time=datetime.now(),
+        id="usdt_check_job",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logging.info(
+        f"Scheduler started. Checking transactions every {config.check_interval_seconds} seconds."
+    )
 
-        # 8. Setup and Start Scheduler
-        scheduler = AsyncIOScheduler(timezone="UTC")
-        scheduler.add_job(
-            transaction_checker.check_all_addresses,  # Use the method from the checker instance
-            "interval",
-            seconds=config.check_interval_seconds,
-            next_run_time=datetime.now(),  # Run immediately on start
-            id="usdt_check_job",
-            replace_existing=True,  # Avoid duplicate jobs on restart if needed
-        )
-        scheduler.start()
-        logging.info(
-            f"Scheduler started. Checking transactions every {config.check_interval_seconds} seconds."
-        )
-
-        # 9. Start Bot Polling
-        logging.info("Starting bot polling...")
-        try:
-            # Start polling without skipping updates initially to process any missed ones
-            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-        finally:
-            logging.info("Shutting down...")
-            scheduler.shutdown()
-            # Session is closed automatically by async with
-            await bot.session.close()  # Gracefully close bot session
-            logging.info("Scheduler shut down. Bot session closed. Exiting.")
+    # 8. Start Bot Polling
+    logging.info("Starting bot polling...")
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        logging.info("Shutting down...")
+        scheduler.shutdown()
+        await bot.session.close()
+        logging.info("Scheduler shut down. Bot session closed. Exiting.")
 
 
 if __name__ == "__main__":
