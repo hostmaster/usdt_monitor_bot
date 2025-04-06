@@ -165,6 +165,9 @@ class TransactionChecker:
                     try:
                         # Skip if we've already processed this transaction
                         tx_hash = tx.get("hash")
+                        if tx_hash is None:
+                            logging.warning(f"Transaction has no hash, skipping: {tx}")
+                            continue
                         if tx_hash in processed_tx_hashes:
                             continue
                         processed_tx_hashes.add(tx_hash)
