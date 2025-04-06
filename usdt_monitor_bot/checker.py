@@ -170,7 +170,8 @@ class TransactionChecker:
                         processed_tx_hashes.add(tx_hash)
 
                         # Check if it's an *incoming* token transaction for the monitored address
-                        if tx.get("to") and tx.get("to", "").lower() == address_lower:
+                        tx_to = tx.get("to")
+                        if tx_to and tx_to.lower() == address_lower:
                             # Look up the token by contract address
                             tx_token = self._config.token_registry.get_token_by_address(
                                 tx["contractAddress"]
