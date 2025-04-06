@@ -17,32 +17,34 @@ os.makedirs(DATA_DIR, exist_ok=True)
 class BotConfig:
     """Configuration for the USDT Monitor Bot."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        telegram_bot_token: str,
+        etherscan_api_key: str,
+        db_path: str = "usdt_monitor.db",
+        etherscan_base_url: str = "https://api.etherscan.io/api",
+        etherscan_request_delay: float = 0.2,
+        check_interval_seconds: int = 60,
+    ):
         # Telegram Bot Token
-        self.telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        self.telegram_bot_token = telegram_bot_token
         if not self.telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
 
         # Etherscan API Key
-        self.etherscan_api_key: str = os.getenv("ETHERSCAN_API_KEY", "")
+        self.etherscan_api_key = etherscan_api_key
         if not self.etherscan_api_key:
             raise ValueError("ETHERSCAN_API_KEY environment variable is required")
 
         # Database Configuration
-        self.db_path: str = os.getenv("DB_PATH", "usdt_monitor.db")
+        self.db_path = db_path
 
         # Etherscan API Settings
-        self.etherscan_base_url: str = os.getenv(
-            "ETHERSCAN_BASE_URL", "https://api.etherscan.io/api"
-        )
-        self.etherscan_request_delay: float = float(
-            os.getenv("ETHERSCAN_REQUEST_DELAY", "0.2")
-        )  # Delay between requests in seconds
+        self.etherscan_base_url = etherscan_base_url
+        self.etherscan_request_delay = etherscan_request_delay
 
         # Check interval settings
-        self.check_interval_seconds: int = int(
-            os.getenv("CHECK_INTERVAL_SECONDS", "60")
-        )  # Default to 60 seconds
+        self.check_interval_seconds = check_interval_seconds
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -97,18 +99,26 @@ def load_config() -> BotConfig:
     """Loads configuration from environment variables."""
     load_dotenv()  # Load .env file if present
 
+    # Required environment variables
     try:
-        bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+        telegram_bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
         etherscan_api_key = os.environ["ETHERSCAN_API_KEY"]
     except KeyError as e:
         logging.error(f"!!! Environment variable {e} not found!")
         sys.exit(f"Environment variable {e} not configured. Exiting.")
 
-    # Create config instance
-    config = BotConfig()
+    # Optional environment variables with defaults
+    db_path = os.getenv("DB_PATH", "usdt_monitor.db")
+    etherscan_base_url = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io/api")
+    etherscan_request_delay = float(os.getenv("ETHERSCAN_REQUEST_DELAY", "0.2"))
+    check_interval_seconds = int(os.getenv("CHECK_INTERVAL_SECONDS", "60"))
 
-    # Override check interval if specified
-    if "CHECK_INTERVAL_SECONDS" in os.environ:
-        config.check_interval_seconds = int(os.environ["CHECK_INTERVAL_SECONDS"])
-
-    return config
+    # Create and return config instance
+    return BotConfig(
+        telegram_bot_token=telegram_bot_token,
+        etherscan_api_key=etherscan_api_key,
+        db_path=db_path,
+        etherscan_base_url=etherscan_base_url,
+        etherscan_request_delay=etherscan_request_delay,
+        check_interval_seconds=check_interval_seconds,
+    )

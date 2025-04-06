@@ -33,6 +33,10 @@ def mock_config():
     config = MagicMock()
     config.etherscan_base_url = "https://api.etherscan.io/api"
     config.etherscan_api_key = "test_api_key"
+    config.telegram_bot_token = "test_bot_token"
+    config.db_path = "test.db"
+    config.etherscan_request_delay = 0.2
+    config.check_interval_seconds = 60
     return config
 
 
