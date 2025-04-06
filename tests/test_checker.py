@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from usdt_monitor_bot.checker import TransactionChecker
+from usdt_monitor_bot.config import BotConfig, TokenConfig
 from usdt_monitor_bot.etherscan import (
     EtherscanRateLimitError,
 )
@@ -51,34 +52,36 @@ TX3_INCOMING_ADDR2_USDC = {
 
 @pytest.fixture
 def mock_config():
-    """Provides a mocked config."""
-    config = MagicMock()
+    """Create a mock config object."""
+    config = MagicMock(spec=BotConfig)
+    config.token_registry = MagicMock()
     config.etherscan_request_delay = 0  # No delay in tests
-    config.usdt_contract = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-    config.usdc_contract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
 
-    # Mock token registry
-    token_registry = MagicMock()
-    usdt_token = MagicMock()
-    usdt_token.contract_address = config.usdt_contract
-    usdt_token.symbol = "USDT"
-    usdc_token = MagicMock()
-    usdc_token.contract_address = config.usdc_contract
-    usdc_token.symbol = "USDC"
+    # Create mock token configs
+    usdt_config = MagicMock(spec=TokenConfig)
+    usdt_config.symbol = "USDT"
+    usdt_config.contract_address = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 
-    token_registry.get_all_tokens.return_value = {
-        "USDT": usdt_token,
-        "USDC": usdc_token,
+    usdc_config = MagicMock(spec=TokenConfig)
+    usdc_config.symbol = "USDC"
+    usdc_config.contract_address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+    # Configure get_token_by_address to return appropriate token configs
+    def get_token_by_address(address):
+        if address == usdt_config.contract_address:
+            return usdt_config
+        elif address == usdc_config.contract_address:
+            return usdc_config
+        return None
+
+    config.token_registry.get_token_by_address.side_effect = get_token_by_address
+
+    # Configure get_all_tokens to return both tokens
+    config.token_registry.get_all_tokens.return_value = {
+        "USDT": usdt_config,
+        "USDC": usdc_config,
     }
-    config.token_registry = token_registry
-    config.get_token_by_address = lambda addr: next(
-        (
-            token
-            for token in token_registry.get_all_tokens().values()
-            if token.contract_address == addr
-        ),
-        None,
-    )
+
     return config
 
 
@@ -158,7 +161,7 @@ async def test_check_address_new_incoming_tx(
     mock_db_manager.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
     assert mock_etherscan_client.get_token_transactions.await_count == 2
     mock_notifier.send_token_notification.assert_awaited_once_with(
-        USER1, ADDR1.lower(), TX1_INCOMING_ADDR1_USDT, "USDT"
+        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
     )
 
 
@@ -200,7 +203,7 @@ async def test_check_mixed_incoming_outgoing(
     mock_db_manager.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
     assert mock_etherscan_client.get_token_transactions.await_count == 2
     mock_notifier.send_token_notification.assert_awaited_once_with(
-        USER1, ADDR1.lower(), TX1_INCOMING_ADDR1_USDT, "USDT"
+        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
     )
 
 
@@ -228,10 +231,10 @@ async def test_check_multiple_addresses(
     assert mock_etherscan_client.get_token_transactions.await_count == 4
     assert mock_notifier.send_token_notification.await_count == 2
     mock_notifier.send_token_notification.assert_any_await(
-        USER1, ADDR1.lower(), TX1_INCOMING_ADDR1_USDT, "USDT"
+        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
     )
     mock_notifier.send_token_notification.assert_any_await(
-        USER2, ADDR2.lower(), TX3_INCOMING_ADDR2_USDC, "USDC"
+        USER2, TX3_INCOMING_ADDR2_USDC, "USDC"
     )
 
 

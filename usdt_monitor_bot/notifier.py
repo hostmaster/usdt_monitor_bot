@@ -1,20 +1,14 @@
 # notifier.py
-import asyncio
 import logging
-from datetime import datetime
-from decimal import Decimal
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
-from aiogram.exceptions import (
-    TelegramBadRequest,
-    TelegramForbiddenError,
-    TelegramRetryAfter,
-)
 from aiogram.utils.markdown import hbold, hcode, hlink
 
-from usdt_monitor_bot.config import BotConfig
+from usdt_monitor_bot.config import BotConfig, TokenConfig
 
 
 class NotificationService:
@@ -26,103 +20,130 @@ class NotificationService:
         logging.info("NotificationService initialized.")
 
     def _format_token_message(
-        self, monitored_address: str, tx: Dict[str, Any], token_type: str
+        self, tx_data: Dict[str, Any], token_config: TokenConfig
     ) -> str:
-        """Formats the notification message for an incoming token transaction."""
+        """Formats a token transaction message with proper decimals and symbols."""
         try:
-            tx_hash = tx["hash"]
-            from_addr = tx["from"]
-            # Use provided decimal or default, handle potential missing key robustly
-            token_decimal = int(
-                tx.get(
-                    "tokenDecimal",
-                    (
-                        self._config.usdt_decimals
-                        if token_type == "USDT"  # nosec
-                        else self._config.usdc_decimals
-                    ),
+            # Validate required fields
+            required_fields = ["hash", "from", "to", "value", "timeStamp"]
+            for field in required_fields:
+                if field not in tx_data:
+                    logging.error(f"Missing required field {field} in transaction data")
+                    return None
+
+            tx_hash = tx_data["hash"]
+            from_address = tx_data["from"]
+            value = tx_data["value"]
+            timestamp = tx_data["timeStamp"]
+
+            # Format value with proper decimals
+            try:
+                decimal_value = Decimal(value) / Decimal(10**token_config.decimals)
+                formatted_value = f"{decimal_value:.2f}"
+            except (ValueError, TypeError, InvalidOperation) as e:
+                logging.error(f"Could not format value {value} for tx {tx_hash}: {e}")
+                return None
+
+            # Format timestamp
+            try:
+                timestamp_int = int(timestamp)
+                formatted_time = datetime.fromtimestamp(
+                    timestamp_int, tz=timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S UTC")
+            except (ValueError, TypeError) as e:
+                logging.error(
+                    f"Could not format timestamp {timestamp} for tx {tx_hash}: {e}"
                 )
-            )
-            value_smallest_unit = Decimal(tx["value"])
-            value_token = value_smallest_unit / (Decimal(10) ** token_decimal)
+                return None
 
-            tx_time_ts = int(tx["timeStamp"])
-            tx_datetime = datetime.fromtimestamp(tx_time_ts).strftime(
-                "%Y-%m-%d %H:%M:%S UTC"
+            # Create message for incoming transaction
+            message = (
+                f"🔔 New Incoming {token_config.symbol} Transfer!\n\n"
+                f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
+                f"From: {hcode(from_address)}\n"
+                f"Time: {formatted_time}\n"
+                f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
             )
-            etherscan_link = f"https://etherscan.io/tx/{tx_hash}"
 
-            # Format amount with commas and correct decimal places
-            amount_str = f"{value_token:,.{token_decimal}f} {token_type}"
+            return message
 
-            message_text = (
-                f"🔔 {hbold(f'New Incoming {token_type} Transfer!')}\n\n"
-                f"💰 To Address: {hcode(monitored_address)}\n"
-                f"💵 Amount: {hbold(amount_str)}\n"
-                f"➡️ From: {hcode(from_addr)}\n"
-                f"⏰ Time: {tx_datetime}\n"
-                f"🔗 {hlink('View on Etherscan', etherscan_link)}"
-            )
-            return message_text
-        except KeyError as e:
-            logging.error(f"Missing key {e} in transaction data: {tx}")
-            return f"⚠️ Error formatting transaction {tx.get('hash', 'N/A')}. Data might be incomplete."
         except Exception as e:
-            logging.error(
-                f"Error formatting message for tx {tx.get('hash', 'N/A')}: {e}"
-            )
-            return f"⚠️ Error formatting transaction {tx.get('hash', 'N/A')}."
+            error_msg = f"Error formatting transaction {tx_hash}: {str(e)}"
+            logging.error(error_msg)
+            return None
 
     async def send_token_notification(
         self,
         user_id: int,
-        monitored_address: str,
-        tx_data: Dict[str, Any],
+        tx: dict,
         token_type: str,
-    ):
-        """Sends a formatted token transaction notification to a user."""
-        message_text = self._format_token_message(
-            monitored_address, tx_data, token_type
-        )
-        if message_text.startswith("⚠️"):  # Don't send malformed messages
-            logging.warning(
-                f"Skipping notification to {user_id} due to formatting error for tx {tx_data.get('hash')}"
-            )
+    ) -> None:
+        """
+        Send a notification for a token transaction.
+
+        Args:
+            user_id: The Telegram user ID to send the notification to
+            tx: The transaction data from Etherscan
+            token_type: The token symbol (e.g. 'USDT', 'USDC')
+        """
+        if not tx:
+            logging.warning("Received empty transaction data, skipping notification")
             return
 
         try:
-            await self._bot.send_message(
-                user_id,
-                message_text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-            logging.debug(
-                f"Sent {token_type} notification to {user_id} for tx {tx_data['hash']}"
-            )
-            await asyncio.sleep(0.1)  # Small delay between sends
-        except TelegramRetryAfter as e:
-            logging.warning(
-                f"Rate limited sending to user {user_id}. Sleeping for {e.retry_after}s"
-            )
-            await asyncio.sleep(e.retry_after)
-            try:
+            # Get token configuration
+            token_config = self._config.token_registry.get_token(token_type)
+            if not token_config:
+                logging.error(f"Token configuration not found for {token_type}")
+                return
+
+            # Format the message using token-specific configuration
+            message = self._format_token_message(tx, token_config)
+
+            # Only send the message if it was successfully formatted
+            if message is not None:
+                # Send the message
                 await self._bot.send_message(
-                    user_id,
-                    message_text,
+                    chat_id=user_id,
+                    text=message,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
-                )  # Retry
-            except Exception as inner_e:
-                logging.error(
-                    f"Failed to send notification to user {user_id} after retry: {inner_e}"
                 )
-        except (TelegramForbiddenError, TelegramBadRequest) as e:
-            logging.error(
-                f"Telegram API error sending to user {user_id}: {e}. User might have blocked the bot or chat not found."
-                # Consider removing user/wallet if forbidden for extended periods?
-            )
+                logging.info(
+                    f"Sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
+                )
+            else:
+                logging.warning(
+                    f"Message formatting failed for tx {tx.get('hash', 'unknown')}, skipping notification"
+                )
+
         except Exception as e:
             logging.error(
-                f"Unexpected error sending {token_type} notification to user {user_id}: {e}"
+                f"Error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
+                exc_info=True,
             )
+
+    async def _send_token_notification(
+        self, user_id: int, tx: dict, token_config: TokenConfig
+    ) -> None:
+        """Send a notification for a specific token transaction."""
+        try:
+            # Format the message using token-specific configuration
+            message = self._format_token_message(tx, token_config)
+
+            # Only send the message if it was successfully formatted
+            if message is not None:
+                # Send the message
+                await self._bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                logging.info(f"Sent notification to user {user_id} for tx {tx['hash']}")
+
+        except Exception as e:
+            logging.error(
+                f"Error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}"
+            )
+            raise

@@ -4,6 +4,8 @@ from unittest.mock import MagicMock  # Import MagicMock if needed by fixture
 
 import pytest
 
+from usdt_monitor_bot.config import BotConfig, TokenConfig
+
 # Adjust the import path based on your project structure
 # If is_valid_ethereum_address remains in handlers.py:
 from usdt_monitor_bot.handlers import is_valid_ethereum_address
@@ -18,16 +20,13 @@ from usdt_monitor_bot.notifier import NotificationService  # Import the service
 
 # --- Constants ---
 SAMPLE_TX = {
-    "blockNumber": "15000000",
-    "timeStamp": "1775000014",  # 2025-04-05 22:53:34 UTC
     "hash": "0xabcdef123456",
-    "from": "0xsenderaddress",
-    "to": "0xrecipientaddress",
-    "value": "123456789",
-    "contractAddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    "tokenDecimal": "6",
+    "from": "0xsender",
+    "to": "0x1234567890123456789012345678901234567890",
+    "value": "1000000",  # 1.00 USDT (6 decimals)
+    "timeStamp": "1620000000",
 }
-MONITORED_ADDRESS = "0xrecipientaddress"
+MONITORED_ADDRESS = "0x1234567890123456789012345678901234567890"
 
 VALID_ADDRESS = "0x1234567890abcdef1234567890abcdef12345678"
 INVALID_ADDRESS = "0xinvalid"
@@ -38,17 +37,24 @@ VALID_ADDRESS_UPPER = "0x1234567890ABCDEF1234567890ABCDEF12345678"
 
 @pytest.fixture
 def mock_config():
-    """Provides a mocked config with token decimals."""
-    config = MagicMock()
-    config.usdt_decimals = 6
-    config.usdc_decimals = 6
+    """Create a mock config object."""
+    config = MagicMock(spec=BotConfig)
+    config.token_registry = MagicMock()
+    config.token_registry.get_token.return_value = TokenConfig(
+        name="Tether USD",
+        contract_address="0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        decimals=6,
+        symbol="USDT",
+        display_name="USDT",
+        explorer_url="https://etherscan.io/token/0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    )
     return config
 
 
 @pytest.fixture
 def notifier_formatter(mock_config):
-    """Provides a NotificationService with mocked dependencies."""
-    return NotificationService(config=mock_config, bot=MagicMock())
+    """Create a NotificationService instance with mocked dependencies."""
+    return NotificationService(MagicMock(), mock_config)
 
 
 def test_address_validation():
@@ -77,25 +83,24 @@ def test_address_validation():
 def test_format_usdt_message_success(notifier_formatter):
     """Test successful message formatting."""
     formatted_message = notifier_formatter._format_token_message(
-        MONITORED_ADDRESS, SAMPLE_TX, "USDT"
+        SAMPLE_TX,
+        notifier_formatter._config.token_registry.get_token("USDT"),
     )
     assert "New Incoming USDT Transfer!" in formatted_message
-    assert MONITORED_ADDRESS in formatted_message
-    assert SAMPLE_TX["hash"] in formatted_message
-    assert SAMPLE_TX["from"] in formatted_message
-    assert (
-        "123.456789 USDT" in formatted_message
-    )  # Value should be formatted with all decimals
+    assert "1.00 USDT" in formatted_message
+    assert "0xsender" in formatted_message  # Check sender address
+    assert "View on Etherscan" in formatted_message
+    assert "2021-05-03" in formatted_message  # Check date
 
 
 def test_format_usdt_message_missing_key(notifier_formatter):
     """Test message formatting with missing data."""
     incomplete_tx = {
         "hash": "0xabcdef123456",
-        # Missing other required fields
+        "value": "invalid",  # This will cause a value formatting error
     }
     formatted_message = notifier_formatter._format_token_message(
-        MONITORED_ADDRESS, incomplete_tx, "USDT"
+        incomplete_tx,
+        notifier_formatter._config.token_registry.get_token("USDT"),
     )
-    assert formatted_message.startswith("⚠️")
-    assert "Error formatting transaction" in formatted_message
+    assert formatted_message is None  # Error cases now return None

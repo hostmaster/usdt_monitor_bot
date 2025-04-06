@@ -20,9 +20,6 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Local data directory (will be mounted as a volume)
-data/
-
 # Local secrets file (if using .env)
 .env
 

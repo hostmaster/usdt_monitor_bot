@@ -2,7 +2,8 @@ services:
   telegram-bot:
     image: ghcr.io/hostmaster/usdt_monitor_bot:stable
     env_file: [.env]
-    volumes: [data:/app/data]
+    volumes:
+      - usdt_monitor_data:/app/data
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -10,4 +11,4 @@ services:
         max-size: "10m"
         max-file: "5"
 volumes:
-  data:
+  usdt_monitor_data:
