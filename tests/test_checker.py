@@ -1,11 +1,11 @@
 # tests/test_checker.py
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from usdt_monitor_bot.checker import TransactionChecker
-from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
     EtherscanClient,
@@ -57,48 +57,43 @@ TX3_INCOMING_ADDR2_USDC = {
 @pytest.fixture
 def mock_config():
     """Create a mock config object."""
-    config = MagicMock(spec=BotConfig)
+    config = MagicMock()
+    config.etherscan_base_url = "https://api.etherscan.io/api"
+    config.etherscan_api_key = "test_api_key"
+    config.telegram_bot_token = "test_bot_token"
+    config.db_path = "test.db"
     config.etherscan_request_delay = 0.2
+    config.check_interval_seconds = 60
     config.max_transaction_age_days = 7
     config.max_transactions_per_check = 10
 
-    # Create token objects
+    # Create token registry mock
+    token_registry = MagicMock()
     usdt_token = MagicMock()
     usdt_token.contract_address = USDT_CONTRACT
     usdt_token.symbol = "USDT"
-    usdt_token.decimals = 6
-    usdt_token.explorer_url = "https://etherscan.io"
-
     usdc_token = MagicMock()
     usdc_token.contract_address = USDC_CONTRACT
     usdc_token.symbol = "USDC"
-    usdc_token.decimals = 6
-    usdc_token.explorer_url = "https://etherscan.io"
 
-    # Create token registry
-    token_registry = MagicMock()
+    # Setup token registry methods
     token_registry.get_all_tokens.return_value = {
         "USDT": usdt_token,
         "USDC": usdc_token,
     }
+    token_registry.get_token_by_address.side_effect = lambda addr: next(
+        (
+            token
+            for token in token_registry.get_all_tokens().values()
+            if token.contract_address.lower() == addr.lower()
+        ),
+        None,
+    )
+    token_registry.get_token.side_effect = lambda symbol: {
+        "USDT": usdt_token,
+        "USDC": usdc_token,
+    }.get(symbol)
 
-    def get_token_by_address(address):
-        address = address.lower()
-        if address == USDT_CONTRACT.lower():
-            return usdt_token
-        elif address == USDC_CONTRACT.lower():
-            return usdc_token
-        return None
-
-    def get_token(symbol):
-        if symbol == "USDT":
-            return usdt_token
-        elif symbol == "USDC":
-            return usdc_token
-        return None
-
-    token_registry.get_token_by_address.side_effect = get_token_by_address
-    token_registry.get_token.side_effect = get_token
     config.token_registry = token_registry
     return config
 
@@ -107,10 +102,10 @@ def mock_config():
 def mock_db():
     """Create a mock database object."""
     db = AsyncMock(spec=DatabaseManager)
-    db.get_distinct_addresses.return_value = [ADDR1]
-    db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    db.get_users_for_address.return_value = [USER1]
-    db.update_last_checked_block.return_value = True
+    db.get_distinct_addresses = AsyncMock(return_value=[])
+    db.get_last_checked_block = AsyncMock(return_value=0)
+    db.get_users_for_address = AsyncMock(return_value=[])
+    db.update_last_checked_block = AsyncMock(return_value=True)
     return db
 
 
@@ -118,21 +113,19 @@ def mock_db():
 def mock_etherscan():
     """Create a mock Etherscan client."""
     client = AsyncMock(spec=EtherscanClient)
+    client.get_token_transactions = AsyncMock(return_value=[])
     return client
 
 
 @pytest.fixture
-def mock_notifier(mock_config):
+def mock_notifier():
     """Create a mock notification service."""
     notifier = AsyncMock(spec=NotificationService)
     notifier._bot = AsyncMock()
     notifier._bot.send_message = AsyncMock(return_value=None)
-    notifier._config = mock_config
+    notifier._config = MagicMock()
     notifier._format_token_message = MagicMock(return_value="Test message")
-    notifier.send_token_notification = AsyncMock()
-    notifier.send_token_notification.return_value = None
-    notifier.send_token_notification.side_effect = None
-    notifier.send_token_notification.assert_awaited_once_with = AsyncMock()
+    notifier.send_token_notification = AsyncMock(return_value=None)
     notifier.send_token_notification.await_count = 0
     return notifier
 
@@ -174,40 +167,78 @@ async def test_check_address_new_incoming_tx(
     checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
     """Test that notifications are sent for new incoming transactions."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    # Setup test data
+    test_address = "0x123"
+    test_user = 12345
+    test_block = 1000
+    test_tx = {
+        "hash": "0xabc",
+        "blockNumber": str(test_block + 1),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": "0xsender",
+        "to": test_address,
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDT"
+        ].contract_address,
+    }
+
+    # Setup mocks
+    mock_db.get_distinct_addresses.return_value = [test_address]
+    mock_db.get_last_checked_block.return_value = test_block
     mock_etherscan.get_token_transactions.side_effect = [
-        [TX1_INCOMING_ADDR1_USDT],  # USDT transactions
+        [test_tx],  # USDT transactions
         [],  # USDC transactions
     ]
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_users_for_address.return_value = [test_user]
 
+    # Run the checker
     await checker.check_all_addresses()
 
+    # Verify behavior
     mock_db.get_distinct_addresses.assert_awaited_once()
-    mock_db.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
+    mock_db.get_last_checked_block.assert_awaited_once_with(test_address.lower())
     mock_etherscan.get_token_transactions.assert_awaited()
-    await mock_notifier.send_token_notification.assert_awaited_once_with(
-        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
+    mock_notifier.send_token_notification.assert_awaited_once_with(
+        test_user, test_tx, "USDT"
     )
 
 
 async def test_check_address_outgoing_tx_only(
-    checker, mock_db, mock_etherscan, mock_notifier
+    checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
     """Test that no notifications are sent for outgoing transactions."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    # Setup test data
+    test_address = "0x123"
+    test_user = 12345
+    test_block = 1000
+    test_tx = {
+        "hash": "0xabc",
+        "blockNumber": str(test_block + 1),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": test_address,
+        "to": "0xrecipient",
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDT"
+        ].contract_address,
+    }
+
+    # Setup mocks
+    mock_db.get_distinct_addresses.return_value = [test_address]
+    mock_db.get_last_checked_block.return_value = test_block
     mock_etherscan.get_token_transactions.side_effect = [
-        [TX2_OUTGOING_ADDR1_USDT],  # USDT transactions
+        [test_tx],  # USDT transactions
         [],  # USDC transactions
     ]
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_users_for_address.return_value = [test_user]
 
+    # Run the checker
     await checker.check_all_addresses()
 
+    # Verify behavior
     mock_db.get_distinct_addresses.assert_awaited_once()
-    mock_db.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
+    mock_db.get_last_checked_block.assert_awaited_once_with(test_address.lower())
     assert mock_etherscan.get_token_transactions.await_count == 2
     mock_notifier.send_token_notification.assert_not_awaited()
 
@@ -216,21 +247,51 @@ async def test_check_mixed_incoming_outgoing(
     checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
     """Test that only incoming transactions trigger notifications."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    # Setup test data
+    test_address = "0x123"
+    test_user = 12345
+    test_block = 1000
+    incoming_tx = {
+        "hash": "0xabc",
+        "blockNumber": str(test_block + 1),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": "0xsender",
+        "to": test_address,
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDT"
+        ].contract_address,
+    }
+    outgoing_tx = {
+        "hash": "0xdef",
+        "blockNumber": str(test_block + 2),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": test_address,
+        "to": "0xrecipient",
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDT"
+        ].contract_address,
+    }
+
+    # Setup mocks
+    mock_db.get_distinct_addresses.return_value = [test_address]
+    mock_db.get_last_checked_block.return_value = test_block
     mock_etherscan.get_token_transactions.side_effect = [
-        [TX1_INCOMING_ADDR1_USDT, TX2_OUTGOING_ADDR1_USDT],  # USDT transactions
+        [incoming_tx, outgoing_tx],  # USDT transactions
         [],  # USDC transactions
     ]
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_users_for_address.return_value = [test_user]
 
+    # Run the checker
     await checker.check_all_addresses()
 
+    # Verify behavior
     mock_db.get_distinct_addresses.assert_awaited_once()
-    mock_db.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
+    mock_db.get_last_checked_block.assert_awaited_once_with(test_address.lower())
     mock_etherscan.get_token_transactions.assert_awaited()
-    await mock_notifier.send_token_notification.assert_awaited_once_with(
-        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
+    mock_notifier.send_token_notification.assert_awaited_once_with(
+        test_user, incoming_tx, "USDT"
     )
 
 
@@ -238,31 +299,57 @@ async def test_check_multiple_addresses(
     checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
     """Test that multiple addresses are processed correctly."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1, ADDR2]
-    mock_db.get_last_checked_block.side_effect = [
-        BLOCK_ADDR1_START,
-        BLOCK_ADDR2_START,
-    ]
+    # Setup test data
+    test_address1 = "0x123"
+    test_address2 = "0x456"
+    test_user1 = 12345
+    test_user2 = 67890
+    test_block1 = 1000
+    test_block2 = 2000
+    tx1 = {
+        "hash": "0xabc",
+        "blockNumber": str(test_block1 + 1),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": "0xsender",
+        "to": test_address1,
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDT"
+        ].contract_address,
+    }
+    tx2 = {
+        "hash": "0xdef",
+        "blockNumber": str(test_block2 + 1),
+        "timeStamp": str(int(datetime.now(timezone.utc).timestamp())),
+        "from": "0xsender",
+        "to": test_address2,
+        "value": "1000000",
+        "contractAddress": mock_config.token_registry.get_all_tokens()[
+            "USDC"
+        ].contract_address,
+    }
+
+    # Setup mocks
+    mock_db.get_distinct_addresses.return_value = [test_address1, test_address2]
+    mock_db.get_last_checked_block.side_effect = [test_block1, test_block2]
     mock_etherscan.get_token_transactions.side_effect = [
-        [TX1_INCOMING_ADDR1_USDT],  # ADDR1 USDT transactions
+        [tx1],  # ADDR1 USDT transactions
         [],  # ADDR1 USDC transactions
         [],  # ADDR2 USDT transactions
-        [TX3_INCOMING_ADDR2_USDC],  # ADDR2 USDC transactions
+        [tx2],  # ADDR2 USDC transactions
     ]
-    mock_db.get_users_for_address.side_effect = [[USER1], [USER2]]
+    mock_db.get_users_for_address.side_effect = [[test_user1], [test_user2]]
 
+    # Run the checker
     await checker.check_all_addresses()
 
+    # Verify behavior
     mock_db.get_distinct_addresses.assert_awaited_once()
     assert mock_db.get_last_checked_block.await_count == 2
     mock_etherscan.get_token_transactions.assert_awaited()
     assert mock_notifier.send_token_notification.await_count == 2
-    mock_notifier.send_token_notification.assert_any_await(
-        USER1, TX1_INCOMING_ADDR1_USDT, "USDT"
-    )
-    mock_notifier.send_token_notification.assert_any_await(
-        USER2, TX3_INCOMING_ADDR2_USDC, "USDC"
-    )
+    mock_notifier.send_token_notification.assert_any_await(test_user1, tx1, "USDT")
+    mock_notifier.send_token_notification.assert_any_await(test_user2, tx2, "USDC")
 
 
 async def test_check_etherscan_rate_limit(
@@ -338,7 +425,7 @@ async def test_transaction_age_filtering(
     await checker.check_all_addresses()
 
     # Verify that only the recent transaction was processed
-    await mock_notifier.send_token_notification.assert_awaited_once_with(
+    mock_notifier.send_token_notification.assert_awaited_once_with(
         USER1, recent_tx, "USDT"
     )
 
@@ -423,7 +510,7 @@ async def test_invalid_timestamp_handling(
     await checker.check_all_addresses()
 
     # Verify that only the valid transaction was processed
-    await mock_notifier.send_token_notification.assert_awaited_once_with(
+    mock_notifier.send_token_notification.assert_awaited_once_with(
         USER1, valid_tx, "USDT"
     )
 
@@ -469,42 +556,48 @@ async def test_transaction_age_boundary_handling(
     """Test that transactions exactly at the age boundary are included."""
     # Create transactions with timestamps exactly at the boundary
     now = datetime.now(timezone.utc)
-    boundary_age = timedelta(days=mock_config.max_transaction_age_days)
-    boundary_tx = {
-        "blockNumber": str(BLOCK_ADDR1_START + 1),
-        "timeStamp": str(int((now - boundary_age).timestamp())),
-        "hash": "0x000003e9",
-        "from": "0xsender",
-        "to": ADDR1,
-        "value": "1000000",
-        "contractAddress": USDT_CONTRACT,
-    }
-    just_old_tx = {
-        "blockNumber": str(BLOCK_ADDR1_START + 2),
-        "timeStamp": str(int((now - boundary_age - timedelta(seconds=1)).timestamp())),
-        "hash": "0x000003ea",
-        "from": "0xsender",
-        "to": ADDR1,
-        "value": "1000000",
-        "contractAddress": USDT_CONTRACT,
-    }
+    now_ts = int(now.timestamp())  # Convert to integer timestamp
+    # Mock the current time in the checker to match our test time
+    with unittest.mock.patch("usdt_monitor_bot.checker.datetime") as mock_datetime:
+        mock_datetime.now.return_value = datetime.fromtimestamp(now_ts, tz=timezone.utc)
+        mock_datetime.fromtimestamp = datetime.fromtimestamp
+        boundary_age = timedelta(days=mock_config.max_transaction_age_days)
+        boundary_age_seconds = int(boundary_age.total_seconds())
+        boundary_tx = {
+            "blockNumber": str(BLOCK_ADDR1_START + 1),
+            "timeStamp": str(now_ts - boundary_age_seconds),
+            "hash": "0x000003e9",
+            "from": "0xsender",
+            "to": ADDR1,
+            "value": "1000000",
+            "contractAddress": USDT_CONTRACT,
+        }
+        just_old_tx = {
+            "blockNumber": str(BLOCK_ADDR1_START + 2),
+            "timeStamp": str(now_ts - boundary_age_seconds - 1),
+            "hash": "0x000003ea",
+            "from": "0xsender",
+            "to": ADDR1,
+            "value": "1000000",
+            "contractAddress": USDT_CONTRACT,
+        }
 
-    # Setup mock to return both transactions
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_etherscan.get_token_transactions.side_effect = [
-        [boundary_tx, just_old_tx],  # USDT transactions
-        [],  # USDC transactions
-    ]
-    mock_db.get_users_for_address.return_value = [USER1]
+        # Setup mock to return both transactions
+        mock_db.get_distinct_addresses.return_value = [ADDR1]
+        mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+        mock_etherscan.get_token_transactions.side_effect = [
+            [boundary_tx, just_old_tx],  # USDT transactions
+            [],  # USDC transactions
+        ]
+        mock_db.get_users_for_address.return_value = [USER1]
 
-    # Run the checker
-    await checker.check_all_addresses()
+        # Run the checker
+        await checker.check_all_addresses()
 
-    # Verify that only the boundary transaction was processed
-    await mock_notifier.send_token_notification.assert_awaited_once_with(
-        USER1, boundary_tx, "USDT"
-    )
+        # Verify that only the boundary transaction was processed
+        mock_notifier.send_token_notification.assert_awaited_once_with(
+            USER1, boundary_tx, "USDT"
+        )
 
 
 async def test_transaction_count_boundary_handling(

@@ -116,8 +116,16 @@ class TransactionChecker:
                         tx_time = datetime.fromtimestamp(tx_timestamp, tz=timezone.utc)
                         age_seconds = (current_time - tx_time).total_seconds()
 
-                        if age_seconds <= max_age_seconds:
-                            filtered_transactions.append(tx)
+                        logging.debug(
+                            f"Transaction {tx.get('hash')}: age_seconds={age_seconds}, max_age_seconds={max_age_seconds}"
+                        )
+
+                        if age_seconds > max_age_seconds:
+                            logging.debug(
+                                f"Skipping transaction {tx.get('hash')} due to age"
+                            )
+                            continue
+                        filtered_transactions.append(tx)
                     except (ValueError, TypeError) as e:
                         logging.warning(
                             f"Invalid timestamp in transaction {tx.get('hash', 'unknown')}: {e}"
