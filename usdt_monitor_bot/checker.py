@@ -1,6 +1,7 @@
 # checker.py
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict
 
 import aiohttp  # Import needed if creating session here or for type hints
@@ -65,6 +66,9 @@ class TransactionChecker:
                             address_lower,
                             start_block=query_start_block,
                         )
+                        # Add token information to each transaction
+                        for tx in transactions:
+                            tx["token_symbol"] = token.symbol
                         all_transactions.extend(transactions)
                     except EtherscanRateLimitError:
                         logging.warning(
@@ -95,16 +99,53 @@ class TransactionChecker:
                     )
                     continue  # Move to the next address
 
+                # Filter transactions by age and limit count
+                current_time = datetime.now(timezone.utc)
+                max_age_seconds = self._config.max_transaction_age_days * 24 * 60 * 60
+
+                filtered_transactions = []
+                for tx in all_transactions:
+                    try:
+                        # Skip transactions before the start block
+                        tx_block = int(tx.get("blockNumber", 0))
+                        if tx_block <= start_block:
+                            continue
+
+                        # Skip transactions that are too old
+                        tx_timestamp = int(tx.get("timeStamp", 0))
+                        tx_time = datetime.fromtimestamp(tx_timestamp, tz=timezone.utc)
+                        age_seconds = (current_time - tx_time).total_seconds()
+
+                        if age_seconds <= max_age_seconds:
+                            filtered_transactions.append(tx)
+                    except (ValueError, TypeError) as e:
+                        logging.warning(
+                            f"Invalid timestamp in transaction {tx.get('hash', 'unknown')}: {e}"
+                        )
+                        continue
+
+                # Sort by block number and take the most recent ones
+                filtered_transactions.sort(
+                    key=lambda x: int(x.get("blockNumber", 0)), reverse=True
+                )
+                filtered_transactions = filtered_transactions[
+                    : self._config.max_transactions_per_check
+                ]
+
+                if not filtered_transactions:
+                    latest_block_processed[address_lower] = start_block
+                    continue
+
                 user_ids = await self._db.get_users_for_address(address_lower)
                 if not user_ids:
                     logging.warning(
-                        f"Found {len(all_transactions)} transactions for {address_lower}, "
+                        f"Found {len(filtered_transactions)} transactions for {address_lower}, "
                         "but no users are tracking it. Skipping notification."
                     )
                     # Still need to update the last checked block if txs were found
                     current_max_block_for_addr = max(
                         int(tx["blockNumber"])
-                        for tx in all_transactions
+                        for tx in filtered_transactions
                         if tx.get("blockNumber")
                     )
                     latest_block_processed[address_lower] = max(
@@ -113,39 +154,41 @@ class TransactionChecker:
                     continue
 
                 logging.info(
-                    f"Processing {len(all_transactions)} potential new tx(s) involving {address_lower}"
+                    f"Processing {len(filtered_transactions)} potential new tx(s) involving {address_lower}"
                 )
 
                 current_max_block_for_addr = start_block
                 notifications_sent = 0
-                for tx in all_transactions:
-                    try:
-                        tx_block = int(tx["blockNumber"])
-                        # Although we query from start_block+1, Etherscan might rarely include the boundary block. Double-check.
-                        if tx_block <= start_block:
-                            continue
+                processed_tx_hashes = set()  # Track processed transactions
 
-                        # Get token configuration for this transaction
-                        token_config = self._config.token_registry.get_token_by_address(
-                            tx.get("contractAddress", "")
-                        )
-                        if not token_config:
-                            logging.warning(
-                                f"Unknown token contract address in transaction {tx.get('hash', 'N/A')}"
-                            )
+                for tx in filtered_transactions:
+                    try:
+                        # Skip if we've already processed this transaction
+                        tx_hash = tx.get("hash")
+                        if tx_hash in processed_tx_hashes:
                             continue
+                        processed_tx_hashes.add(tx_hash)
 
                         # Check if it's an *incoming* token transaction for the monitored address
-                        if tx.get("to", "").lower() == address_lower:
-                            for user_id in user_ids:
-                                await self._notifier.send_token_notification(
-                                    user_id, tx, token_config.symbol
+                        if tx.get("to") and tx.get("to", "").lower() == address_lower:
+                            # Look up the token by contract address
+                            tx_token = self._config.token_registry.get_token_by_address(
+                                tx["contractAddress"]
+                            )
+                            if tx_token:
+                                for user_id in user_ids:
+                                    await self._notifier.send_token_notification(
+                                        user_id, tx, tx_token.symbol
+                                    )
+                                    notifications_sent += 1
+                            else:
+                                logging.warning(
+                                    f"Token not found for contract address {tx.get('contractAddress')} in tx {tx.get('hash')}"
                                 )
-                                notifications_sent += 1
 
                         # Update the max block seen *in this batch* for this address
                         current_max_block_for_addr = max(
-                            current_max_block_for_addr, tx_block
+                            current_max_block_for_addr, int(tx.get("blockNumber", 0))
                         )
 
                     except (ValueError, KeyError, TypeError) as e:

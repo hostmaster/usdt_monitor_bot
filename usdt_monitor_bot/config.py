@@ -31,6 +31,8 @@ class BotConfig:
         etherscan_base_url: str = "https://api.etherscan.io/api",
         etherscan_request_delay: float = 0.2,
         check_interval_seconds: int = 60,
+        max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
+        max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -51,6 +53,10 @@ class BotConfig:
 
         # Check interval settings
         self.check_interval_seconds = check_interval_seconds
+
+        # Transaction window settings
+        self.max_transaction_age_days = max_transaction_age_days
+        self.max_transactions_per_check = max_transactions_per_check
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -112,6 +118,8 @@ def load_config() -> BotConfig:
     etherscan_base_url = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io/api")
     etherscan_request_delay = float(os.getenv("ETHERSCAN_REQUEST_DELAY", "0.2"))
     check_interval_seconds = int(os.getenv("CHECK_INTERVAL_SECONDS", "60"))
+    max_transaction_age_days = int(os.getenv("MAX_TRANSACTION_AGE_DAYS", "7"))
+    max_transactions_per_check = int(os.getenv("MAX_TRANSACTIONS_PER_CHECK", "10"))
 
     # Create and return config instance
     config = BotConfig(
@@ -121,6 +129,8 @@ def load_config() -> BotConfig:
         etherscan_base_url=etherscan_base_url,
         etherscan_request_delay=etherscan_request_delay,
         check_interval_seconds=check_interval_seconds,
+        max_transaction_age_days=max_transaction_age_days,
+        max_transactions_per_check=max_transactions_per_check,
     )
 
     # Override token configurations if specified in environment
