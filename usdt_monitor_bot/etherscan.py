@@ -1,143 +1,108 @@
 # etherscan.py
+import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import List
 
 import aiohttp
+from aiohttp import ClientTimeout
+
+from usdt_monitor_bot.config import BotConfig
 
 
 class EtherscanError(Exception):
-    """Custom exception for Etherscan API errors."""
+    """Base class for Etherscan API errors."""
 
     pass
 
 
 class EtherscanRateLimitError(EtherscanError):
-    """Specific exception for rate limit errors."""
+    """Raised when the Etherscan API rate limit is exceeded."""
 
     pass
 
 
 class EtherscanClient:
-    """Handles interactions with the Etherscan API."""
+    """Client for interacting with the Etherscan API."""
 
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        api_key: str,
-        api_url: str,
-        usdt_contract: str,
-        usdc_contract: str,
-        timeout: int,
-    ):
-        self._session = session
-        self._api_key = api_key
-        self._api_url = api_url
-        self._usdt_contract = usdt_contract
-        self._usdc_contract = usdc_contract
-        self._timeout = aiohttp.ClientTimeout(total=timeout)
+    def __init__(self, config: BotConfig):
+        self._config = config
+        self._base_url = config.etherscan_base_url
+        self._api_key = config.etherscan_api_key
+        self._timeout = ClientTimeout(total=30)  # 30 seconds timeout
+        self._session = None
         logging.info("EtherscanClient initialized.")
 
+    async def __aenter__(self):
+        """Create a new session when entering the context."""
+        self._session = aiohttp.ClientSession(timeout=self._timeout)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Close the session when exiting the context."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+
     async def get_token_transactions(
-        self,
-        address: str,
-        contract_address: str,
-        start_block: int = 0,
-        end_block: int = 99999999,
-    ) -> List[Dict[str, Any]]:
+        self, contract_address: str, address: str, start_block: int = 0
+    ) -> List[dict]:
         """
-        Fetches token transactions for a given address and contract from a specific block.
+        Get token transactions for an address from a specific block number.
+
+        Args:
+            contract_address: The token contract address
+            address: The address to check transactions for
+            start_block: The block number to start checking from
 
         Returns:
-            List of transaction dictionaries if successful.
+            List of transaction dictionaries
+
         Raises:
-            EtherscanRateLimitError: If rate limit is hit.
-            EtherscanError: For other API errors or unexpected responses.
-            aiohttp.ClientError: For network-related issues.
-            asyncio.TimeoutError: If the request times out.
+            EtherscanRateLimitError: If the API rate limit is exceeded
+            EtherscanError: For other API errors
         """
+        if not self._session:
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+
         params = {
             "module": "account",
             "action": "tokentx",
-            "contractaddress": contract_address,
             "address": address,
+            "contractaddress": contract_address,
             "startblock": start_block,
-            "endblock": end_block,
+            "endblock": 99999999,  # Far future block
             "sort": "asc",
             "apikey": self._api_key,
         }
-        logging.debug(
-            f"Querying Etherscan tokentx for {address} from block {start_block}"
-        )
 
         try:
-            async with self._session.get(
-                self._api_url, params=params, timeout=self._timeout
-            ) as response:
-                response.raise_for_status()  # Raise ClientResponseError for 4xx/5xx
+            async with self._session.get(self._base_url, params=params) as response:
+                if response.status == 429:  # Too Many Requests
+                    raise EtherscanRateLimitError("Rate limit exceeded")
+
+                if response.status != 200:
+                    raise EtherscanError(
+                        f"API request failed with status {response.status}"
+                    )
+
                 data = await response.json()
+                if data.get("status") != "1":
+                    message = data.get("message", "Unknown error")
+                    if "rate limit" in message.lower():
+                        raise EtherscanRateLimitError(message)
+                    raise EtherscanError(f"API error: {message}")
 
-                if data.get("status") == "1":
-                    result = data.get("result", [])
-                    if isinstance(result, list):
-                        logging.debug(
-                            f"Received {len(result)} tx results for {address} from Etherscan."
-                        )
-                        return result
-                    else:
-                        logging.error(
-                            f"Unexpected Etherscan 'result' format for {address}: {result}"
-                        )
-                        raise EtherscanError(
-                            f"Unexpected result format: {type(result)}"
-                        )
+                return data.get("result", [])
 
-                elif data.get("status") == "0":
-                    message = data.get("message", "").lower()
-                    result_info = data.get(
-                        "result", ""
-                    )  # Sometimes error details are in result
-                    if "no transactions found" in message:
-                        logging.debug(
-                            f"No new token transactions found for {address} since block {start_block} (API Message)."
-                        )
-                        return []  # Return empty list, not an error
-                    elif (
-                        "rate limit" in message
-                        or "rate limit" in str(result_info).lower()
-                    ):
-                        logging.warning(f"Etherscan rate limit reached for {address}.")
-                        raise EtherscanRateLimitError(
-                            "Etherscan API rate limit reached."
-                        )
-                    else:
-                        logging.error(
-                            f"Etherscan API error for {address}: {message} - Result: {result_info}"
-                        )
-                        raise EtherscanError(f"API Error: {message} - {result_info}")
-                else:
-                    logging.error(f"Unknown Etherscan API status for {address}: {data}")
-                    raise EtherscanError(f"Unknown API status: {data.get('status')}")
+        except aiohttp.ClientError as e:
+            raise EtherscanError(f"Network error: {e}") from e
+        except asyncio.TimeoutError as e:
+            raise EtherscanError(f"Request timeout: {e}") from e
+        except ValueError as e:
+            raise EtherscanError(f"Invalid JSON response: {e}") from e
 
-        except aiohttp.ClientResponseError as e:
-            logging.error(
-                f"Etherscan HTTP error for {address}: Status {e.status} - {e.message}"
-            )
-            # Re-raise as a generic ClientError or specific EtherscanError if desired
-            raise EtherscanError(f"HTTP Error {e.status}: {e.message}") from e
-        # TimeoutError and other ClientErrors are implicitly raised
-
-    async def get_usdt_token_transactions(
-        self, address: str, start_block: int = 0, end_block: int = 99999999
-    ) -> List[Dict[str, Any]]:
-        """Wrapper for USDT transactions."""
-        return await self.get_token_transactions(
-            address, self._usdt_contract, start_block, end_block
-        )
-
-    async def get_usdc_token_transactions(
-        self, address: str, start_block: int = 0, end_block: int = 99999999
-    ) -> List[Dict[str, Any]]:
-        """Wrapper for USDC transactions."""
-        return await self.get_token_transactions(
-            address, self._usdc_contract, start_block, end_block
-        )
+    async def close(self):
+        """Close the session if it exists."""
+        if self._session:
+            await self._session.close()
+            self._session = None

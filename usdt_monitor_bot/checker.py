@@ -16,7 +16,7 @@ from usdt_monitor_bot.notifier import NotificationService
 
 
 class TransactionChecker:
-    """Periodically checks for new USDT and USDC transactions for monitored addresses."""
+    """Periodically checks for new token transactions for monitored addresses."""
 
     def __init__(
         self,
@@ -56,21 +56,32 @@ class TransactionChecker:
                     f"Checking address {address_lower} from block {query_start_block}"
                 )
 
-                # Check both USDT and USDC transactions
-                usdt_transactions = await self._etherscan.get_usdt_token_transactions(
-                    address_lower, start_block=query_start_block
-                )
-                usdc_transactions = await self._etherscan.get_usdc_token_transactions(
-                    address_lower, start_block=query_start_block
-                )
+                # Get all supported tokens
+                all_transactions = []
+                for token in self._config.token_registry.get_all_tokens().values():
+                    try:
+                        transactions = await self._etherscan.get_token_transactions(
+                            token.contract_address,
+                            address_lower,
+                            start_block=query_start_block,
+                        )
+                        all_transactions.extend(transactions)
+                    except EtherscanRateLimitError:
+                        logging.warning(
+                            f"Rate limited checking {address_lower} for {token.symbol}. "
+                            "Will retry next cycle. Not updating block number."
+                        )
+                        continue
+                    except EtherscanError as e:
+                        logging.error(
+                            f"Error checking {token.symbol} transactions for {address_lower}: {e}"
+                        )
+                        continue
 
-                all_transactions = usdt_transactions + usdc_transactions
                 if not all_transactions:
                     # No new transactions found via API, keep last checked block as is
                     # We only update if transactions *were* processed successfully up to a certain block
-                    latest_block_processed[address_lower] = (
-                        start_block  # Record current block
-                    )
+                    latest_block_processed[address_lower] = start_block
                     logging.debug(
                         f"No new tx found for {address_lower} > block {start_block}."
                     )
@@ -79,7 +90,8 @@ class TransactionChecker:
                 user_ids = await self._db.get_users_for_address(address_lower)
                 if not user_ids:
                     logging.warning(
-                        f"Found {len(all_transactions)} transactions for {address_lower}, but no users are tracking it. Skipping notification."
+                        f"Found {len(all_transactions)} transactions for {address_lower}, "
+                        "but no users are tracking it. Skipping notification."
                     )
                     # Still need to update the last checked block if txs were found
                     current_max_block_for_addr = max(
@@ -105,23 +117,21 @@ class TransactionChecker:
                         if tx_block <= start_block:
                             continue
 
-                        # Check if it's an *incoming* token transaction for the monitored address
-                        is_incoming_usdt = (
-                            tx.get("contractAddress", "").lower()
-                            == self._config.usdt_contract_address.lower()
-                            and tx.get("to", "").lower() == address_lower
+                        # Get token configuration for this transaction
+                        token_config = self._config.get_token_by_address(
+                            tx.get("contractAddress", "")
                         )
-                        is_incoming_usdc = (
-                            tx.get("contractAddress", "").lower()
-                            == self._config.usdc_contract_address.lower()
-                            and tx.get("to", "").lower() == address_lower
-                        )
+                        if not token_config:
+                            logging.warning(
+                                f"Unknown token contract address in transaction {tx.get('hash', 'N/A')}"
+                            )
+                            continue
 
-                        if is_incoming_usdt or is_incoming_usdc:
-                            token_type = "USDT" if is_incoming_usdt else "USDC"
+                        # Check if it's an *incoming* token transaction for the monitored address
+                        if tx.get("to", "").lower() == address_lower:
                             for user_id in user_ids:
                                 await self._notifier.send_token_notification(
-                                    user_id, address_lower, tx, token_type
+                                    user_id, address_lower, tx, token_config.symbol
                                 )
                                 notifications_sent += 1
 

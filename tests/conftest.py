@@ -1,5 +1,6 @@
 # tests/conftest.py
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -9,6 +10,8 @@ import pytest
 from aiogram import Bot
 from aiogram.filters.command import CommandObject
 from aiogram.types import Chat, Message, User
+
+from usdt_monitor_bot.checker import TransactionChecker
 
 # Import project components
 from usdt_monitor_bot.config import BotConfig
@@ -20,17 +23,16 @@ from usdt_monitor_bot.notifier import NotificationService
 @pytest.fixture
 def mock_config() -> BotConfig:
     """Provides a basic BotConfig for testing."""
-    return BotConfig(
-        bot_token="fake_token",
-        etherscan_api_key="fake_etherscan_key",
-        database_file=":memory:",
-        check_interval_seconds=10,
-        etherscan_request_delay=0.1,
-        usdt_contract_address="0xdAC17F958D2ee523a2206206994597C13D831ec7".lower(),
-        usdt_decimals=6,
-        etherscan_api_url="https://api.etherscan.io/api",
-        etherscan_timeout_seconds=5,
-    )
+    # Set required environment variables
+    os.environ["TELEGRAM_BOT_TOKEN"] = "fake_token"
+    os.environ["ETHERSCAN_API_KEY"] = "fake_etherscan_key"
+    os.environ["DB_PATH"] = ":memory:"
+    os.environ["ETHERSCAN_BASE_URL"] = "https://api-test.etherscan.io/api"
+    os.environ["ETHERSCAN_REQUEST_DELAY"] = "0.1"
+    os.environ["USDT_CONTRACT_ADDRESS"] = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    os.environ["USDC_CONTRACT_ADDRESS"] = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+
+    return BotConfig()
 
 
 @pytest.fixture
@@ -105,37 +107,36 @@ def mock_bot() -> AsyncMock:
 
 @pytest.fixture
 def mock_db_manager() -> AsyncMock:
-    # Use spec=DatabaseManager
-    manager = AsyncMock(spec=DatabaseManager)
-    manager.init_db = AsyncMock(return_value=True)
-    manager.add_user = AsyncMock(return_value=True)  # Simulate successful first add
-    manager.check_user_exists = AsyncMock(return_value=False)  # Default to not existing
-    manager.add_wallet = AsyncMock(return_value=True)  # Simulate successful first add
-    manager.list_wallets = AsyncMock(return_value=[])  # Default to empty list
-    manager.remove_wallet = AsyncMock(return_value=True)  # Simulate successful remove
-    manager.get_distinct_addresses = AsyncMock(return_value=[])  # Default to empty list
-    manager.get_users_for_address = AsyncMock(return_value=[])  # Default to empty list
-    manager.get_last_checked_block = AsyncMock(return_value=0)  # Default to 0
-    manager.update_last_checked_block = AsyncMock(return_value=True)  # Simulate success
-    return manager
+    """Provides a mocked DatabaseManager."""
+    return AsyncMock(spec=DatabaseManager)
 
 
 @pytest.fixture
 def mock_etherscan_client() -> AsyncMock:
-    # Use spec=EtherscanClient
-    client = AsyncMock(spec=EtherscanClient)
-    client.get_usdt_token_transactions = AsyncMock(
-        return_value=[]
-    )  # Default to empty list
-    return client
+    """Provides a mocked EtherscanClient."""
+    return AsyncMock(spec=EtherscanClient)
 
 
 @pytest.fixture
 def mock_notifier() -> AsyncMock:
-    # Use spec=NotificationService
-    notifier = AsyncMock(spec=NotificationService)
-    notifier.send_usdt_notification = AsyncMock()
-    return notifier
+    """Provides a mocked NotificationService."""
+    return AsyncMock(spec=NotificationService)
+
+
+@pytest.fixture
+def checker(
+    mock_config: BotConfig,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
+    mock_notifier: AsyncMock,
+) -> TransactionChecker:
+    """Provides a TransactionChecker with mocked dependencies."""
+    return TransactionChecker(
+        config=mock_config,
+        db_manager=mock_db_manager,
+        etherscan_client=mock_etherscan_client,
+        notifier=mock_notifier,
+    )
 
 
 @pytest.fixture
