@@ -143,30 +143,6 @@ async def test_send_token_notification_unknown_token(
 
 
 @pytest.mark.asyncio
-async def test_send_token_notification_unknown_token(mock_telegram_bot, mock_config):
-    """Test that notification is not sent for unknown token type."""
-    # Setup
-    notifier = NotificationService(mock_telegram_bot, mock_config)
-    tx = {
-        "hash": "0x123",
-        "from": "0xabc",
-        "to": "0xdef",
-        "value": "1000000",
-        "contractAddress": "0xunknown",
-    }
-
-    # Configure mock to return None for unknown token
-    mock_config.token_registry.get_token.return_value = None
-
-    # Test
-    await notifier.send_token_notification(USER1, tx, "UNKNOWN_TOKEN")
-
-    # Verify
-    mock_telegram_bot.send_message.assert_not_called()
-    mock_config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")
-
-
-@pytest.mark.asyncio
 async def test_send_token_notification_unrelated_transaction(
     notifier: NotificationService, mock_telegram_bot
 ):
