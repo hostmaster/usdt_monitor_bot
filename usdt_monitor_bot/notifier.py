@@ -114,7 +114,7 @@ class NotificationService:
             try:
                 formatted_time = format_timestamp(timestamp)
                 if not formatted_time:
-                    logging.warning(f"Invalid timestamp for transaction {tx_hash}")
+                    logging.warning(f"Invalid timestamp {timestamp} for transaction {tx_hash}")
                     return None
             except Exception as e:
                 logging.warning(
