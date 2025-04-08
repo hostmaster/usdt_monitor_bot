@@ -221,3 +221,69 @@ async def test_send_token_notification_mixed_tx(
     assert "🔔 New USDT Transfer!" in outgoing_message
     assert "To: <code>0xrecipient</code>" in outgoing_message
     assert "Amount: <b>2.00 USDT</b>" in outgoing_message
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_self_transfer(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test notification formatting for self-transfers (same address as sender and receiver)."""
+    self_tx = {
+        "hash": "0x789",
+        "from": "0x123",
+        "to": "0x123",  # Same as from address
+        "value": "1000000",
+        "timeStamp": "1620000000",
+        "monitored_address": "0x123",
+    }
+
+    await notifier.send_token_notification(USER1, self_tx, "USDT")
+    mock_telegram_bot.send_message.assert_called_once()
+    message = mock_telegram_bot.send_message.call_args[1]["text"]
+    assert "🔔 New USDT Transfer!" in message
+    assert "To: <code>0x123</code>" in message
+    assert "Amount: <b>1.00 USDT</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_zero_value(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test notification formatting for zero-value transfers."""
+    zero_tx = {
+        "hash": "0x789",
+        "from": "0xsender",
+        "to": "0x123",
+        "value": "0",
+        "timeStamp": "1620000000",
+        "monitored_address": "0x123",
+    }
+
+    await notifier.send_token_notification(USER1, zero_tx, "USDT")
+    mock_telegram_bot.send_message.assert_called_once()
+    message = mock_telegram_bot.send_message.call_args[1]["text"]
+    assert "🔔 New USDT Transfer!" in message
+    assert "From: <code>0xsender</code>" in message
+    assert "Amount: <b>0.00 USDT</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_large_value(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test notification formatting for large value transfers."""
+    large_tx = {
+        "hash": "0x789",
+        "from": "0xsender",
+        "to": "0x123",
+        "value": "1000000000000",  # 1 million USDT
+        "timeStamp": "1620000000",
+        "monitored_address": "0x123",
+    }
+
+    await notifier.send_token_notification(USER1, large_tx, "USDT")
+    mock_telegram_bot.send_message.assert_called_once()
+    message = mock_telegram_bot.send_message.call_args[1]["text"]
+    assert "🔔 New USDT Transfer!" in message
+    assert "From: <code>0xsender</code>" in message
+    assert "Amount: <b>1000000.00 USDT</b>" in message

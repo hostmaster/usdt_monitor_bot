@@ -26,6 +26,19 @@ class NotificationService:
         is_incoming: bool,
         timestamp: int,
     ) -> str:
+        """Format a token transaction notification message.
+
+        Args:
+            tx_hash: The transaction hash
+            address: The address to display (sender for incoming, recipient for outgoing)
+            value: The transaction amount as a float
+            token_config: Configuration for the token type (USDT, USDC, etc.)
+            is_incoming: True if this is an incoming transaction, False if outgoing
+            timestamp: Unix timestamp of the transaction
+
+        Returns:
+            str: Formatted HTML message for Telegram notification, or None if formatting fails
+        """
         try:
             formatted_value = format_token_amount(value, token_config.decimals)
             address_to_show = format_address(address)
@@ -78,7 +91,14 @@ class NotificationService:
             # Add monitored address to transaction data for message formatting
             tx_data = dict(tx)
             monitored_address = tx_data.get("monitored_address")
-            is_incoming = monitored_address == tx_data.get("to")
+
+            # Handle self-transfers (when from and to are the same address)
+            if tx_data.get("from") == tx_data.get("to"):
+                is_incoming = (
+                    False  # Treat self-transfers as outgoing for notification purposes
+                )
+            else:
+                is_incoming = monitored_address == tx_data.get("to")
 
             # Select the address to show based on transaction direction
             address_to_show = tx_data.get("from") if is_incoming else tx_data.get("to")
