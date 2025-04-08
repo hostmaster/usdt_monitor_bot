@@ -1,64 +1,92 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base",
+    "config:recommended",
     ":dependencyDashboard",
     ":prHourlyLimit2",
     ":prConcurrentLimit10",
     ":semanticCommits",
     ":semanticPrefixFix",
     ":ignoreModulesAndTests",
-    ":autodetectPinVersions",
     ":separateMultipleMajorReleases",
     ":separatePatchReleases"
   ],
   "packageRules": [
     {
-      "matchPackagePatterns": ["^python$"],
-      "enabled": false
-    },
-    {
-      "matchPackagePatterns": ["^types-"],
-      "groupName": "type definitions",
-      "groupSlug": "types"
-    },
-    {
-      "matchPackagePatterns": ["^pytest-"],
-      "groupName": "pytest packages",
-      "groupSlug": "pytest"
-    },
-    {
-      "matchPackagePatterns": [
-        "^black$",
-        "^isort$",
-        "^flake8$",
-        "^mypy$",
-        "^pylint$"
+      "matchCategories": [
+        "python"
       ],
+      "addLabels": [
+        "python"
+      ],
+      "major": {
+        "addLabels": [
+          "python-major"
+        ]
+      }
+    },
+    {
+      "enabled": false,
+      "matchPackageNames": [
+        "/^python$/"
+      ]
+    },
+    {
+      "groupName": "type definitions",
+      "groupSlug": "types",
+      "matchPackageNames": [
+        "/^types-/"
+      ]
+    },
+    {
+      "groupName": "pytest packages",
+      "groupSlug": "pytest",
+      "matchPackageNames": [
+        "/^pytest-/"
+      ]
+    },
+    {
       "groupName": "linting packages",
-      "groupSlug": "linting"
+      "groupSlug": "linting",
+      "matchPackageNames": [
+        "/^black$/",
+        "/^isort$/",
+        "/^flake8$/",
+        "/^mypy$/",
+        "/^pylint$/"
+      ]
     }
   ],
-  "schedule": ["every weekend"],
+  "schedule": [
+    "every weekend"
+  ],
   "prHourlyLimit": 2,
   "prConcurrentLimit": 10,
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "assignees": [],
   "reviewers": [],
-  "stabilityDays": 3,
+  "minimumReleaseAge": "3 days",
   "internalChecksFilter": "strict",
   "rangeStrategy": "pin",
   "lockFileMaintenance": {
     "enabled": true,
-    "extends": ["config:base"],
+    "extends": [
+      "config:recommended"
+    ],
     "packageRules": [
       {
-        "matchPackagePatterns": ["*"],
-        "rangeStrategy": "pin"
+        "rangeStrategy": "pin",
+        "matchPackageNames": [
+          "*"
+        ]
       }
     ]
   },
-  "postUpdateOptions": ["gomodTidy"],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "ignoreDeps": [],
   "ignorePaths": [
     "**/node_modules/**",
@@ -71,14 +99,10 @@
     "**/.env/**"
   ],
   "vulnerabilityAlerts": {
-    "labels": ["security"],
+    "labels": [
+      "security"
+    ],
     "assignees": [],
     "reviewers": []
-  },
-  "python": {
-    "addLabels": ["python"],
-    "major": {
-      "addLabels": ["python-major"]
-    }
   }
 }
