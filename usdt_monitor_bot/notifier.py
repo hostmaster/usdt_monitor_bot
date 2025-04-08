@@ -40,27 +40,71 @@ class NotificationService:
             str: Formatted HTML message for Telegram notification, or None if formatting fails
         """
         try:
-            formatted_value = format_token_amount(value, token_config.decimals)
-            address_to_show = format_address(address)
-            formatted_time = format_timestamp(timestamp)
-
-            if not all([formatted_value, address_to_show, formatted_time]):
+            # Validate inputs
+            if not all([tx_hash, address, token_config]):
+                logging.warning(f"Missing required fields for transaction {tx_hash}")
                 return None
 
+            # Format the value with proper error handling
+            try:
+                formatted_value = format_token_amount(value, token_config.decimals)
+                if formatted_value is None:
+                    logging.warning(
+                        f"Could not format value {value} for transaction {tx_hash}"
+                    )
+                    return None
+            except (ValueError, TypeError) as e:
+                logging.warning(
+                    f"Error formatting value for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Format the address with proper error handling
+            try:
+                address_to_show = format_address(address)
+                if not address_to_show:
+                    logging.warning(f"Invalid address format for transaction {tx_hash}")
+                    return None
+            except Exception as e:
+                logging.warning(
+                    f"Error formatting address for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Format the timestamp with proper error handling
+            try:
+                formatted_time = format_timestamp(timestamp)
+                if not formatted_time:
+                    logging.warning(f"Invalid timestamp for transaction {tx_hash}")
+                    return None
+            except Exception as e:
+                logging.warning(
+                    f"Error formatting timestamp for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Determine the direction label
             address_label = "From" if is_incoming else "To"
 
-            message = (
-                f"🔔 New {token_config.symbol} Transfer!\n"
-                f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
-                f"{address_label}: {hcode(address_to_show)}\n"
-                f"Time: {formatted_time}\n"
-                f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
-            )
-            return message
+            # Construct the message with proper error handling
+            try:
+                message = (
+                    f"🔔 New {token_config.symbol} Transfer!\n"
+                    f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
+                    f"{address_label}: {hcode(address_to_show)}\n"
+                    f"Time: {formatted_time}\n"
+                    f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
+                )
+                return message
+            except Exception as e:
+                logging.error(
+                    f"Error constructing message for transaction {tx_hash}: {e}"
+                )
+                return None
 
         except Exception as e:
-            error_msg = f"Error formatting transaction {tx_hash}: {str(e)}"
-            logging.error(error_msg)
+            error_msg = f"Unexpected error formatting transaction {tx_hash}: {str(e)}"
+            logging.error(error_msg, exc_info=True)
             return None
 
     async def send_token_notification(
@@ -82,6 +126,11 @@ class NotificationService:
             return
 
         try:
+            # Validate user_id
+            if not isinstance(user_id, int) or user_id <= 0:
+                logging.warning(f"Invalid user_id: {user_id}, skipping notification")
+                return
+
             # Get token configuration
             token_config = self._config.token_registry.get_token(token_type)
             if not token_config:
@@ -96,6 +145,9 @@ class NotificationService:
             if tx_data.get("from") == tx_data.get("to"):
                 is_incoming = (
                     False  # Treat self-transfers as outgoing for notification purposes
+                )
+                logging.info(
+                    f"Self-transfer detected for transaction {tx_data.get('hash', 'unknown')}"
                 )
             else:
                 is_incoming = monitored_address == tx_data.get("to")
@@ -115,16 +167,22 @@ class NotificationService:
 
             # Only send the message if it was successfully formatted
             if message is not None:
-                # Send the message
-                await self._bot.send_message(
-                    chat_id=user_id,
-                    text=message,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                logging.info(
-                    f"Sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
-                )
+                try:
+                    # Send the message
+                    await self._bot.send_message(
+                        chat_id=user_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    logging.info(
+                        f"Successfully sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
+                    )
+                except Exception as e:
+                    logging.error(
+                        f"Failed to send message to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
+                        exc_info=True,
+                    )
             else:
                 logging.warning(
                     f"Message formatting failed for tx {tx.get('hash', 'unknown')}, skipping notification"
@@ -132,7 +190,7 @@ class NotificationService:
 
         except Exception as e:
             logging.error(
-                f"Error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
+                f"Unexpected error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
                 exc_info=True,
             )
 
