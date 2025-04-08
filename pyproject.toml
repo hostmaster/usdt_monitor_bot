@@ -2,7 +2,7 @@
 
 # Build system configuration (PEP 518)
 [build-system]
-requires = ["setuptools>=61.0"] # Specify minimum setuptools version needed
+requires = ["setuptools==78.1.0"] # Specify minimum setuptools version needed
 build-backend = "setuptools.build_meta" # The backend used to build the package (standard for setuptools)
 
 # Project metadata (PEP 621)
@@ -38,22 +38,22 @@ keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "cryp
 # NOTE: Keep this in sync with requirements.txt if using both,
 # especially for Docker builds relying on requirements.txt.
 dependencies = [
-    "aiogram>=3.0.0",      # Core bot framework
-    "aiohttp>=3.8.0",      # For async HTTP requests (Etherscan)
-    "apscheduler>=3.9.0",  # For scheduled tasks (monitoring job)
-    "python-dotenv>=0.20" # Optional: For loading .env file locally (good practice)
+    "aiogram==3.19.0",      # Core bot framework
+    "aiohttp==3.11.16",      # For async HTTP requests (Etherscan)
+    "apscheduler==3.11.0",  # For scheduled tasks (monitoring job)
+    "python-dotenv==1.1.0" # Optional: For loading .env file locally (good practice)
 ]
 
 # Optional dependencies (for development, testing, etc.)
 [project.optional-dependencies]
 test = [
-    "pytest>=7.0.0",
+    "pytest==8.3.5",
     "pytest-asyncio>=0.18.0",
     "pytest-mock>=3.7.0",
 ]
 dev = [
     "usdt-monitor-bot[test]", # Include test dependencies in dev
-    "ruff>=0.1.0",           # Linter (optional)
+    "ruff==0.11.4",           # Linter (optional)
     # Add other development tools here
 ]
 
