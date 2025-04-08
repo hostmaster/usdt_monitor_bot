@@ -70,27 +70,6 @@ class NotificationService:
             if not token_config or not isinstance(token_config, TokenConfig):
                 logging.warning(f"Invalid token configuration: {token_config}")
                 return None
-            if not hasattr(token_config, "decimals") or not isinstance(
-                token_config.decimals, int
-            ):
-                logging.warning(
-                    f"Token configuration missing or invalid decimals: {token_config}"
-                )
-                return None
-            if not hasattr(token_config, "symbol") or not isinstance(
-                token_config.symbol, str
-            ):
-                logging.warning(
-                    f"Token configuration missing or invalid symbol: {token_config}"
-                )
-                return None
-            if not hasattr(token_config, "explorer_url") or not isinstance(
-                token_config.explorer_url, str
-            ):
-                logging.warning(
-                    f"Token configuration missing or invalid explorer_url: {token_config}"
-                )
-                return None
 
             # Validate timestamp
             if not isinstance(timestamp, int):
