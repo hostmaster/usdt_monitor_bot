@@ -1,6 +1,6 @@
 # notifier.py
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -40,27 +40,131 @@ class NotificationService:
             str: Formatted HTML message for Telegram notification, or None if formatting fails
         """
         try:
-            formatted_value = format_token_amount(value, token_config.decimals)
-            address_to_show = format_address(address)
-            formatted_time = format_timestamp(timestamp)
-
-            if not all([formatted_value, address_to_show, formatted_time]):
+            # Validate transaction hash
+            if not tx_hash or not isinstance(tx_hash, str):
+                logging.warning(f"Invalid transaction hash: {tx_hash}")
+                return None
+            if not tx_hash.startswith("0x"):
+                logging.warning(f"Transaction hash {tx_hash} must start with '0x'")
                 return None
 
+            # Validate address
+            if not address or not isinstance(address, str):
+                logging.warning(f"Invalid address: {address}")
+                return None
+            if not address.startswith("0x"):
+                logging.warning(f"Address {address} must start with '0x'")
+                return None
+
+            # Validate value
+            if not isinstance(value, (int, float)):
+                logging.warning(
+                    f"Invalid value type: {type(value)}, expected int or float"
+                )
+                return None
+            if value < 0:
+                logging.warning(f"Negative value not allowed: {value}")
+                return None
+
+            # Validate token config
+            if not token_config or not isinstance(token_config, TokenConfig):
+                logging.warning(f"Invalid token configuration: {token_config}")
+                return None
+            if not hasattr(token_config, "decimals") or not isinstance(
+                token_config.decimals, int
+            ):
+                logging.warning(
+                    f"Token configuration missing or invalid decimals: {token_config}"
+                )
+                return None
+            if not hasattr(token_config, "symbol") or not isinstance(
+                token_config.symbol, str
+            ):
+                logging.warning(
+                    f"Token configuration missing or invalid symbol: {token_config}"
+                )
+                return None
+            if not hasattr(token_config, "explorer_url") or not isinstance(
+                token_config.explorer_url, str
+            ):
+                logging.warning(
+                    f"Token configuration missing or invalid explorer_url: {token_config}"
+                )
+                return None
+
+            # Validate timestamp
+            if not isinstance(timestamp, int):
+                logging.warning(
+                    f"Invalid timestamp type: {type(timestamp)}, expected int"
+                )
+                return None
+            current_time = int(datetime.now(timezone.utc).timestamp())
+            if (
+                timestamp < 0 or timestamp > current_time + 3600
+            ):  # Allow 1 hour in future for clock drift
+                logging.warning(f"Timestamp {timestamp} is out of valid range")
+                return None
+
+            # Format the value with proper error handling
+            try:
+                formatted_value = format_token_amount(value, token_config.decimals)
+                if formatted_value is None:
+                    logging.warning(
+                        f"Could not format value {value} for transaction {tx_hash}"
+                    )
+                    return None
+            except (ValueError, TypeError) as e:
+                logging.warning(
+                    f"Error formatting value for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Format the address with proper error handling
+            try:
+                address_to_show = format_address(address)
+                if not address_to_show:
+                    logging.warning(f"Invalid address format for transaction {tx_hash}")
+                    return None
+            except Exception as e:
+                logging.warning(
+                    f"Error formatting address for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Format the timestamp with proper error handling
+            try:
+                formatted_time = format_timestamp(timestamp)
+                if not formatted_time:
+                    logging.warning(f"Invalid timestamp for transaction {tx_hash}")
+                    return None
+            except Exception as e:
+                logging.warning(
+                    f"Error formatting timestamp for transaction {tx_hash}: {e}"
+                )
+                return None
+
+            # Determine the direction label
             address_label = "From" if is_incoming else "To"
 
-            message = (
-                f"🔔 New {token_config.symbol} Transfer!\n"
-                f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
-                f"{address_label}: {hcode(address_to_show)}\n"
-                f"Time: {formatted_time}\n"
-                f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
-            )
-            return message
+            # Construct the message with proper error handling
+            try:
+                message = (
+                    f"🔔 New {token_config.symbol} Transfer!\n"
+                    f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
+                    f"{address_label}: {hcode(address_to_show)}\n"
+                    f"Time: {formatted_time}\n"
+                    f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
+                )
+                return message
+            except Exception as e:
+                logging.error(
+                    f"Error constructing message for transaction {tx_hash}: {e}"
+                )
+                return None
 
         except Exception as e:
-            error_msg = f"Error formatting transaction {tx_hash}: {str(e)}"
-            logging.error(error_msg)
+            error_msg = f"Unexpected error formatting transaction {tx_hash}: {str(e)}"
+            logging.error(error_msg, exc_info=True)
             return None
 
     async def send_token_notification(
