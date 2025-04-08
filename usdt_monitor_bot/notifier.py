@@ -1,8 +1,6 @@
 # notifier.py
 import logging
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any, Dict
+from datetime import datetime
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -20,51 +18,31 @@ class NotificationService:
         logging.info("NotificationService initialized.")
 
     def _format_token_message(
-        self, tx_data: Dict[str, Any], token_config: TokenConfig
+        self,
+        tx_hash: str,
+        address: str,
+        value: float,
+        token_config: TokenConfig,
+        is_incoming: bool,
+        timestamp: int,
     ) -> str:
-        """Formats a token transaction message with proper decimals and symbols."""
         try:
-            # Validate required fields
-            required_fields = ["hash", "from", "to", "value", "timeStamp"]
-            for field in required_fields:
-                if field not in tx_data:
-                    logging.error(f"Missing required field {field} in transaction data")
-                    return None
+            formatted_value = format_token_amount(value, token_config.decimals)
+            address_to_show = format_address(address)
+            formatted_time = format_timestamp(timestamp)
 
-            tx_hash = tx_data["hash"]
-            from_address = tx_data["from"]
-            value = tx_data["value"]
-            timestamp = tx_data["timeStamp"]
-
-            # Format value with proper decimals
-            try:
-                decimal_value = Decimal(value) / Decimal(10**token_config.decimals)
-                formatted_value = f"{decimal_value:.2f}"
-            except (ValueError, TypeError, InvalidOperation) as e:
-                logging.error(f"Could not format value {value} for tx {tx_hash}: {e}")
+            if not all([formatted_value, address_to_show, formatted_time]):
                 return None
 
-            # Format timestamp
-            try:
-                timestamp_int = int(timestamp)
-                formatted_time = datetime.fromtimestamp(
-                    timestamp_int, tz=timezone.utc
-                ).strftime("%Y-%m-%d %H:%M:%S UTC")
-            except (ValueError, TypeError) as e:
-                logging.error(
-                    f"Could not format timestamp {timestamp} for tx {tx_hash}: {e}"
-                )
-                return None
+            address_label = "From" if is_incoming else "To"
 
-            # Create message for incoming transaction
             message = (
-                f"🔔 New Incoming {token_config.symbol} Transfer!\n\n"
+                f"🔔 New {token_config.symbol} Transfer!\n"
                 f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
-                f"From: {hcode(from_address)}\n"
+                f"{address_label}: {hcode(address_to_show)}\n"
                 f"Time: {formatted_time}\n"
                 f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
             )
-
             return message
 
         except Exception as e:
@@ -97,8 +75,23 @@ class NotificationService:
                 logging.error(f"Token configuration not found for {token_type}")
                 return
 
+            # Add monitored address to transaction data for message formatting
+            tx_data = dict(tx)
+            monitored_address = tx_data.get("monitored_address")
+            is_incoming = monitored_address == tx_data.get("to")
+
+            # Select the address to show based on transaction direction
+            address_to_show = tx_data.get("from") if is_incoming else tx_data.get("to")
+
             # Format the message using token-specific configuration
-            message = self._format_token_message(tx, token_config)
+            message = self._format_token_message(
+                tx_data["hash"],
+                address_to_show,
+                float(tx_data["value"]),
+                token_config,
+                is_incoming,
+                int(tx_data["timeStamp"]),
+            )
 
             # Only send the message if it was successfully formatted
             if message is not None:
@@ -129,7 +122,14 @@ class NotificationService:
         """Send a notification for a specific token transaction."""
         try:
             # Format the message using token-specific configuration
-            message = self._format_token_message(tx, token_config)
+            message = self._format_token_message(
+                tx["hash"],
+                tx["monitored_address"],
+                float(tx["value"]),
+                token_config,
+                tx["monitored_address"] == tx["from"],
+                int(tx["timeStamp"]),
+            )
 
             # Only send the message if it was successfully formatted
             if message is not None:
@@ -147,3 +147,27 @@ class NotificationService:
                 f"Error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}"
             )
             raise
+
+
+def format_token_amount(value: float, decimals: int = 6) -> str:
+    """Format token amount with 2 decimal places, considering token decimals."""
+    try:
+        actual_value = float(value) / (10**decimals)
+        return f"{actual_value:.2f}"
+    except (ValueError, TypeError):
+        return None
+
+
+def format_address(address: str) -> str:
+    """Format address for display."""
+    if not address:
+        return None
+    return address  # Show full address
+
+
+def format_timestamp(timestamp: int) -> str:
+    """Format timestamp as human-readable date."""
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None

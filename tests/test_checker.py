@@ -207,7 +207,7 @@ async def test_check_address_new_incoming_tx(
 async def test_check_address_outgoing_tx_only(
     checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
-    """Test that no notifications are sent for outgoing transactions."""
+    """Test that notifications are sent for outgoing transactions."""
     # Setup test data
     test_address = "0x123"
     test_user = 12345
@@ -240,13 +240,15 @@ async def test_check_address_outgoing_tx_only(
     mock_db.get_distinct_addresses.assert_awaited_once()
     mock_db.get_last_checked_block.assert_awaited_once_with(test_address.lower())
     assert mock_etherscan.get_token_transactions.await_count == 2
-    mock_notifier.send_token_notification.assert_not_awaited()
+    mock_notifier.send_token_notification.assert_awaited_once_with(
+        test_user, test_tx, "USDT"
+    )
 
 
 async def test_check_mixed_incoming_outgoing(
     checker, mock_db, mock_etherscan, mock_notifier, mock_config
 ):
-    """Test that only incoming transactions trigger notifications."""
+    """Test that both incoming and outgoing transactions trigger notifications."""
     # Setup test data
     test_address = "0x123"
     test_user = 12345
@@ -290,8 +292,12 @@ async def test_check_mixed_incoming_outgoing(
     mock_db.get_distinct_addresses.assert_awaited_once()
     mock_db.get_last_checked_block.assert_awaited_once_with(test_address.lower())
     mock_etherscan.get_token_transactions.assert_awaited()
-    mock_notifier.send_token_notification.assert_awaited_once_with(
+    assert mock_notifier.send_token_notification.await_count == 2
+    mock_notifier.send_token_notification.assert_any_await(
         test_user, incoming_tx, "USDT"
+    )
+    mock_notifier.send_token_notification.assert_any_await(
+        test_user, outgoing_tx, "USDT"
     )
 
 

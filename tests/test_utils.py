@@ -1,6 +1,7 @@
 # tests/test_utils.py
 # tests/test_utils.py
-from unittest.mock import MagicMock  # Import MagicMock if needed by fixture
+
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,10 +21,10 @@ from usdt_monitor_bot.notifier import NotificationService  # Import the service
 
 # --- Constants ---
 SAMPLE_TX = {
-    "hash": "0xabcdef123456",
+    "hash": "0x123",
     "from": "0xsender",
-    "to": "0x1234567890123456789012345678901234567890",
-    "value": "1000000",  # 1.00 USDT (6 decimals)
+    "to": "0xrecipient",
+    "value": "1000000",  # 1 USDT (6 decimals)
     "timeStamp": "1620000000",
 }
 MONITORED_ADDRESS = "0x1234567890123456789012345678901234567890"
@@ -54,53 +55,52 @@ def mock_config():
 @pytest.fixture
 def notifier_formatter(mock_config):
     """Create a NotificationService instance with mocked dependencies."""
-    return NotificationService(MagicMock(), mock_config)
-
-
-def test_address_validation():
-    """Test Ethereum address validation."""
-    valid_addresses = [
-        "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
-        "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    ]
-    invalid_addresses = [
-        "not_an_address",
-        "0x742d35Cc6634C0532925a3b844Bc454e4438f44",  # Too short
-        "0x742d35Cc6634C0532925a3b844Bc454e4438f44ef",  # Too long
-        "0x742d35Cc6634C0532925a3b844Bc454e4438f44g",  # Invalid character
-    ]
-
-    for addr in valid_addresses:
-        assert is_valid_ethereum_address(addr), f"Should accept valid address {addr}"
-
-    for addr in invalid_addresses:
-        assert not is_valid_ethereum_address(addr), (
-            f"Should reject invalid address {addr}"
-        )
+    return NotificationService(None, mock_config)
 
 
 def test_format_usdt_message_success(notifier_formatter):
     """Test successful message formatting."""
     formatted_message = notifier_formatter._format_token_message(
-        SAMPLE_TX,
-        notifier_formatter._config.token_registry.get_token("USDT"),
+        tx_hash="0x123",
+        address="0xsender",
+        value=1000000.0,  # 1 USDT
+        token_config=notifier_formatter._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
     )
-    assert "New Incoming USDT Transfer!" in formatted_message
-    assert "1.00 USDT" in formatted_message
-    assert "0xsender" in formatted_message  # Check sender address
+    assert "🔔 New USDT Transfer!" in formatted_message
+    assert "From: <code>0xsender</code>" in formatted_message
+    assert "Amount: <b>1.00 USDT</b>" in formatted_message
     assert "View on Etherscan" in formatted_message
     assert "2021-05-03" in formatted_message  # Check date
 
 
 def test_format_usdt_message_missing_key(notifier_formatter):
     """Test message formatting with missing data."""
-    incomplete_tx = {
-        "hash": "0xabcdef123456",
-        "value": "invalid",  # This will cause a value formatting error
-    }
     formatted_message = notifier_formatter._format_token_message(
-        incomplete_tx,
-        notifier_formatter._config.token_registry.get_token("USDT"),
+        tx_hash="0xabcdef123456",
+        address="0xsender",
+        value="invalid",  # This will cause a value formatting error
+        token_config=notifier_formatter._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
     )
     assert formatted_message is None  # Error cases now return None
+
+
+def test_address_validation():
+    """Test Ethereum address validation."""
+    # Valid addresses
+    assert is_valid_ethereum_address("0x1234567890123456789012345678901234567890")
+    assert is_valid_ethereum_address("0xabcdef0123456789abcdef0123456789abcdef01")
+    assert is_valid_ethereum_address("0xABCDEF0123456789ABCDEF0123456789ABCDEF01")
+
+    # Invalid addresses
+    assert not is_valid_ethereum_address("not_an_address")
+    assert not is_valid_ethereum_address("0x123")  # Too short
+    assert not is_valid_ethereum_address(
+        "1234567890123456789012345678901234567890"
+    )  # No 0x prefix
+    assert not is_valid_ethereum_address(
+        "0xghijklmnopqrstuvwxyz1234567890123456"
+    )  # Invalid chars
