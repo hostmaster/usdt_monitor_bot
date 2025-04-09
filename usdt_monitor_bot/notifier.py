@@ -43,8 +43,13 @@ class NotificationService:
             str: Formatted HTML message for Telegram notification, or None if formatting fails
         """
         try:
+            # Quick validation of required fields
+            if not all([tx_hash, address, token_config]):
+                logging.warning(f"Missing required fields for transaction {tx_hash}")
+                return None
+
             # Validate transaction hash
-            if not tx_hash or not isinstance(tx_hash, str):
+            if not isinstance(tx_hash, str):
                 logging.warning(f"Invalid transaction hash: {tx_hash}")
                 return None
             if not tx_hash.startswith("0x"):
@@ -52,7 +57,7 @@ class NotificationService:
                 return None
 
             # Validate address
-            if not address or not isinstance(address, str):
+            if not isinstance(address, str):
                 logging.warning(f"Invalid address: {address}")
                 return None
             if not address.startswith("0x"):
@@ -70,7 +75,7 @@ class NotificationService:
                 return None
 
             # Validate token config
-            if not token_config or not isinstance(token_config, TokenConfig):
+            if not isinstance(token_config, TokenConfig):
                 logging.warning(f"Invalid token configuration: {token_config}")
                 return None
 
@@ -172,6 +177,11 @@ class NotificationService:
             return
 
         try:
+            # Validate user_id
+            if not isinstance(user_id, int) or user_id <= 0:
+                logging.warning(f"Invalid user_id: {user_id}, skipping notification")
+                return
+
             # Get token configuration
             token_config = self._config.token_registry.get_token(token_type)
             if not token_config:
@@ -186,6 +196,9 @@ class NotificationService:
             if tx_data.get("from") == tx_data.get("to"):
                 is_incoming = (
                     False  # Treat self-transfers as outgoing for notification purposes
+                )
+                logging.info(
+                    f"Self-transfer detected for transaction {tx_data.get('hash', 'unknown')}"
                 )
             else:
                 is_incoming = monitored_address == tx_data.get("to")
@@ -205,16 +218,22 @@ class NotificationService:
 
             # Only send the message if it was successfully formatted
             if message is not None:
-                # Send the message
-                await self._bot.send_message(
-                    chat_id=user_id,
-                    text=message,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                logging.info(
-                    f"Sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
-                )
+                try:
+                    # Send the message
+                    await self._bot.send_message(
+                        chat_id=user_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    logging.info(
+                        f"Successfully sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
+                    )
+                except Exception as e:
+                    logging.error(
+                        f"Failed to send message to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
+                        exc_info=True,
+                    )
             else:
                 logging.warning(
                     f"Message formatting failed for tx {tx.get('hash', 'unknown')}, skipping notification"
@@ -222,7 +241,7 @@ class NotificationService:
 
         except Exception as e:
             logging.error(
-                f"Error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
+                f"Unexpected error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
                 exc_info=True,
             )
 
