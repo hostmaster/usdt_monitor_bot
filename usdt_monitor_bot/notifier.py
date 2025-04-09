@@ -1,12 +1,15 @@
 # notifier.py
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.utils.markdown import hbold, hcode, hlink
 
 from usdt_monitor_bot.config import BotConfig, TokenConfig
+
+# Constants
+ALLOWED_FUTURE_TIME_SECONDS = 3600  # 1 hour in seconds, for clock drift tolerance
 
 
 class NotificationService:
@@ -40,9 +43,51 @@ class NotificationService:
             str: Formatted HTML message for Telegram notification, or None if formatting fails
         """
         try:
-            # Validate inputs
+            # Quick validation of required fields
             if not all([tx_hash, address, token_config]):
                 logging.warning(f"Missing required fields for transaction {tx_hash}")
+                return None
+
+            # Validate transaction hash
+            if not isinstance(tx_hash, str):
+                logging.warning(f"Invalid transaction hash: {tx_hash}")
+                return None
+            if not tx_hash.startswith("0x"):
+                logging.warning(f"Transaction hash {tx_hash} must start with '0x'")
+                return None
+
+            # Validate address
+            if not isinstance(address, str):
+                logging.warning(f"Invalid address: {address}")
+                return None
+            if not address.startswith("0x"):
+                logging.warning(f"Address {address} must start with '0x'")
+                return None
+
+            # Validate value
+            if not isinstance(value, (int, float)):
+                logging.warning(
+                    f"Invalid value type: {type(value)}, expected int or float"
+                )
+                return None
+            if value < 0:
+                logging.warning(f"Negative value not allowed: {value}")
+                return None
+
+            # Validate token config
+            if not isinstance(token_config, TokenConfig):
+                logging.warning(f"Invalid token configuration: {token_config}")
+                return None
+
+            # Validate timestamp
+            if not isinstance(timestamp, int):
+                logging.warning(
+                    f"Invalid timestamp type: {type(timestamp)}, expected int"
+                )
+                return None
+            current_time = int(datetime.now(timezone.utc).timestamp())
+            if timestamp < 0 or timestamp > current_time + ALLOWED_FUTURE_TIME_SECONDS:
+                logging.warning(f"Timestamp {timestamp} is out of valid range")
                 return None
 
             # Format the value with proper error handling
@@ -55,7 +100,8 @@ class NotificationService:
                     return None
             except (ValueError, TypeError) as e:
                 logging.warning(
-                    f"Error formatting value for transaction {tx_hash}: {e}"
+                    f"Error formatting value for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -67,7 +113,8 @@ class NotificationService:
                     return None
             except Exception as e:
                 logging.warning(
-                    f"Error formatting address for transaction {tx_hash}: {e}"
+                    f"Error formatting address for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -75,11 +122,14 @@ class NotificationService:
             try:
                 formatted_time = format_timestamp(timestamp)
                 if not formatted_time:
-                    logging.warning(f"Invalid timestamp for transaction {tx_hash}")
-                    return None
+                    logging.warning(
+                        f"Invalid timestamp {timestamp} for transaction {tx_hash}"
+                    )
+                    # Skip returning None here to allow further processing
             except Exception as e:
                 logging.warning(
-                    f"Error formatting timestamp for transaction {tx_hash}: {e}"
+                    f"Error formatting timestamp for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -98,7 +148,8 @@ class NotificationService:
                 return message
             except Exception as e:
                 logging.error(
-                    f"Error constructing message for transaction {tx_hash}: {e}"
+                    f"Error constructing message for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
