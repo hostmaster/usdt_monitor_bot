@@ -33,6 +33,7 @@ class BotConfig:
         check_interval_seconds: int = 60,
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
+        max_addresses_per_user: int = 3,  # Maximum number of addresses per user
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -57,6 +58,11 @@ class BotConfig:
         # Transaction window settings
         self.max_transaction_age_days = max_transaction_age_days
         self.max_transactions_per_check = max_transactions_per_check
+
+        # User limits
+        if max_addresses_per_user <= 0:
+            raise ValueError("max_addresses_per_user must be greater than 0")
+        self.max_addresses_per_user = max_addresses_per_user
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -120,6 +126,7 @@ def load_config() -> BotConfig:
     check_interval_seconds = int(os.getenv("CHECK_INTERVAL_SECONDS", "60"))
     max_transaction_age_days = int(os.getenv("MAX_TRANSACTION_AGE_DAYS", "7"))
     max_transactions_per_check = int(os.getenv("MAX_TRANSACTIONS_PER_CHECK", "10"))
+    max_addresses_per_user = int(os.getenv("MAX_ADDRESSES_PER_USER", "3"))
 
     # Create and return config instance
     config = BotConfig(
@@ -131,6 +138,7 @@ def load_config() -> BotConfig:
         check_interval_seconds=check_interval_seconds,
         max_transaction_age_days=max_transaction_age_days,
         max_transactions_per_check=max_transactions_per_check,
+        max_addresses_per_user=max_addresses_per_user,
     )
 
     # Override token configurations if specified in environment

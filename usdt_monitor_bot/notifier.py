@@ -1,6 +1,7 @@
 # notifier.py
 import logging
 from datetime import datetime, timezone
+from typing import Dict, Set
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -18,6 +19,9 @@ class NotificationService:
     def __init__(self, bot: Bot, config: BotConfig):
         self._bot = bot
         self._config = config
+        self._monitored_addresses: Dict[
+            int, Set[str]
+        ] = {}  # Dict[user_id, Set[addresses]]
         logging.info("NotificationService initialized.")
 
     def _format_token_message(
@@ -177,6 +181,25 @@ class NotificationService:
             return
 
         try:
+            # Initialize set for user if not exists
+            if user_id not in self._monitored_addresses:
+                self._monitored_addresses[user_id] = set()
+
+            # Check if we've reached the maximum number of monitored addresses for this user
+            if (
+                len(self._monitored_addresses[user_id])
+                >= self._config.max_addresses_per_user
+                and tx["to"] not in self._monitored_addresses[user_id]
+            ):
+                logging.warning(
+                    f"Maximum number of monitored addresses ({self._config.max_addresses_per_user}) reached for user {user_id}. "
+                    f"Skipping notification for {tx['to']}"
+                )
+                return
+
+            # Add the address to monitored addresses for this user if it's not already there
+            self._monitored_addresses[user_id].add(tx["to"])
+
             # Validate user_id
             if not isinstance(user_id, int) or user_id <= 0:
                 logging.warning(f"Invalid user_id: {user_id}, skipping notification")

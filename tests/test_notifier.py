@@ -14,6 +14,10 @@ pytestmark = pytest.mark.asyncio
 USER1 = 123456789
 USER2 = 987654321
 ADDR1 = "0x1234567890123456789012345678901234567890"
+ADDR2 = "0x2345678901234567890123456789012345678901"
+ADDR3 = "0x3456789012345678901234567890123456789012"
+ADDR4 = "0x4567890123456789012345678901234567890123"
+
 TX1_INCOMING_USDT = {
     "hash": "0x123",
     "from": "0xabc",
@@ -49,6 +53,32 @@ TX_INVALID_TIMESTAMP = {
     "monitored_address": ADDR1,
 }
 
+# Add test data for multiple addresses
+TX_TO_ADDR2 = {
+    "hash": "0x111",
+    "from": "0xabc",
+    "to": ADDR2,
+    "value": "1000000",
+    "timeStamp": "1620000002",
+    "monitored_address": ADDR2,
+}
+TX_TO_ADDR3 = {
+    "hash": "0x222",
+    "from": "0xdef",
+    "to": ADDR3,
+    "value": "2000000",
+    "timeStamp": "1620000003",
+    "monitored_address": ADDR3,
+}
+TX_TO_ADDR4 = {
+    "hash": "0x333",
+    "from": "0xghi",
+    "to": ADDR4,
+    "value": "3000000",
+    "timeStamp": "1620000004",
+    "monitored_address": ADDR4,
+}
+
 
 @pytest.fixture
 def mock_config():
@@ -63,6 +93,7 @@ def mock_config():
         display_name="USDT",
         explorer_url="https://etherscan.io/token/0xdAC17F958D2ee523a2206206994597C13D831ec7",
     )
+    config.max_addresses_per_user = 3
     return config
 
 
@@ -287,3 +318,116 @@ async def test_send_token_notification_large_value(
     assert "🔔 New USDT Transfer!" in message
     assert "From: <code>0xsender</code>" in message
     assert "Amount: <b>1000000.00 USDT</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_two_addresses(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test monitoring two addresses."""
+    # Send notifications for two different addresses
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR2, "USDT")
+
+    # Verify that both messages were sent
+    assert mock_telegram_bot.send_message.call_count == 2
+
+    # Check first address message
+    message1 = mock_telegram_bot.send_message.call_args_list[0][1]["text"]
+    assert "🔔 New USDT Transfer!" in message1
+    assert "From: <code>0xabc</code>" in message1
+    assert "Amount: <b>1.00 USDT</b>" in message1
+
+    # Check second address message
+    message2 = mock_telegram_bot.send_message.call_args_list[1][1]["text"]
+    assert "🔔 New USDT Transfer!" in message2
+    assert "From: <code>0xabc</code>" in message2
+    assert "Amount: <b>1.00 USDT</b>" in message2
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_three_addresses(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test monitoring three addresses."""
+    # Send notifications for three different addresses
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR2, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR3, "USDT")
+
+    # Verify that all three messages were sent
+    assert mock_telegram_bot.send_message.call_count == 3
+
+    # Check messages
+    messages = [
+        call[1]["text"] for call in mock_telegram_bot.send_message.call_args_list
+    ]
+    for message in messages:
+        assert "🔔 New USDT Transfer!" in message
+        assert (
+            "Amount: <b>1.00 USDT</b>" in message
+            or "Amount: <b>2.00 USDT</b>" in message
+        )
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_four_addresses(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test that the address limit is enforced per user."""
+    # Send notifications for four different addresses for USER1
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR2, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR3, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR4, "USDT")
+
+    # Verify that only three messages were sent for USER1 (max limit)
+    assert mock_telegram_bot.send_message.call_count == 3
+
+    # Reset mock for testing USER2
+    mock_telegram_bot.send_message.reset_mock()
+
+    # Send notifications for three different addresses for USER2
+    await notifier.send_token_notification(USER2, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER2, TX_TO_ADDR2, "USDT")
+    await notifier.send_token_notification(USER2, TX_TO_ADDR3, "USDT")
+
+    # Verify that all three messages were sent for USER2
+    assert mock_telegram_bot.send_message.call_count == 3
+
+    # Check that the addresses are tracked separately for each user
+    assert len(notifier._monitored_addresses[USER1]) == 3
+    assert len(notifier._monitored_addresses[USER2]) == 3
+
+    # Verify that existing addresses can still receive notifications
+    mock_telegram_bot.send_message.reset_mock()
+
+    # Send notification for an already monitored address for USER1
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    assert (
+        mock_telegram_bot.send_message.call_count == 1
+    )  # Should still work for existing address
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_separate_user_limits(
+    notifier: NotificationService, mock_telegram_bot, mock_config
+):
+    """Test that address limits are tracked separately for each user."""
+    # USER1 monitors three addresses
+    await notifier.send_token_notification(USER1, TX1_INCOMING_USDT, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR2, "USDT")
+    await notifier.send_token_notification(USER1, TX_TO_ADDR3, "USDT")
+
+    # USER2 monitors three different addresses
+    await notifier.send_token_notification(USER2, TX_TO_ADDR2, "USDT")
+    await notifier.send_token_notification(USER2, TX_TO_ADDR3, "USDT")
+    await notifier.send_token_notification(USER2, TX_TO_ADDR4, "USDT")
+
+    # Verify that both users can monitor their own set of addresses
+    assert mock_telegram_bot.send_message.call_count == 6  # 3 messages per user
+
+    # Verify that each user has their own set of monitored addresses
+    assert len(notifier._monitored_addresses[USER1]) == 3
+    assert len(notifier._monitored_addresses[USER2]) == 3
+    assert notifier._monitored_addresses[USER1] != notifier._monitored_addresses[USER2]
