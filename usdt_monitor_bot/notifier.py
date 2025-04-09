@@ -8,6 +8,9 @@ from aiogram.utils.markdown import hbold, hcode, hlink
 
 from usdt_monitor_bot.config import BotConfig, TokenConfig
 
+# Constants
+ALLOWED_FUTURE_TIME_SECONDS = 3600  # 1 hour in seconds, for clock drift tolerance
+
 
 class NotificationService:
     """Handles formatting and sending notifications via Telegram."""
@@ -78,9 +81,7 @@ class NotificationService:
                 )
                 return None
             current_time = int(datetime.now(timezone.utc).timestamp())
-            if (
-                timestamp < 0 or timestamp > current_time + 3600
-            ):  # Allow 1 hour in future for clock drift
+            if timestamp < 0 or timestamp > current_time + ALLOWED_FUTURE_TIME_SECONDS:
                 logging.warning(f"Timestamp {timestamp} is out of valid range")
                 return None
 
@@ -94,7 +95,8 @@ class NotificationService:
                     return None
             except (ValueError, TypeError) as e:
                 logging.warning(
-                    f"Error formatting value for transaction {tx_hash}: {e}"
+                    f"Error formatting value for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -106,7 +108,8 @@ class NotificationService:
                     return None
             except Exception as e:
                 logging.warning(
-                    f"Error formatting address for transaction {tx_hash}: {e}"
+                    f"Error formatting address for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -114,11 +117,14 @@ class NotificationService:
             try:
                 formatted_time = format_timestamp(timestamp)
                 if not formatted_time:
-                    logging.warning(f"Invalid timestamp {timestamp} for transaction {tx_hash}")
+                    logging.warning(
+                        f"Invalid timestamp {timestamp} for transaction {tx_hash}"
+                    )
                     return None
             except Exception as e:
                 logging.warning(
-                    f"Error formatting timestamp for transaction {tx_hash}: {e}"
+                    f"Error formatting timestamp for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
@@ -137,7 +143,8 @@ class NotificationService:
                 return message
             except Exception as e:
                 logging.error(
-                    f"Error constructing message for transaction {tx_hash}: {e}"
+                    f"Error constructing message for transaction {tx_hash}: {e}",
+                    exc_info=True,
                 )
                 return None
 
