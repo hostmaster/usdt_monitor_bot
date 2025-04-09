@@ -125,7 +125,7 @@ class NotificationService:
                     logging.warning(
                         f"Invalid timestamp {timestamp} for transaction {tx_hash}"
                     )
-                    return None
+                    # Skip returning None here to allow further processing
             except Exception as e:
                 logging.warning(
                     f"Error formatting timestamp for transaction {tx_hash}: {e}",
