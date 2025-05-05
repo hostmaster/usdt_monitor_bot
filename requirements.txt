@@ -1,6 +1,6 @@
 # requirements.txt
 aiogram==3.20.0.post0 # Or your specific aiogram version
-aiohttp==3.11.16 # Or your specific aiohttp version
+aiohttp==3.11.18 # Or your specific aiohttp version
 apscheduler==3.11.0 # Or your specific apscheduler version
 # Add other direct dependencies if you have any
 python-dotenv==1.1.0 # Add this for .env file support
