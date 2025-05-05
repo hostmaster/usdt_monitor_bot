@@ -2,7 +2,7 @@
 
 # Build system configuration (PEP 518)
 [build-system]
-requires = ["setuptools==79.0.1"] # Specify minimum setuptools version needed
+requires = ["setuptools==80.1.0"] # Specify minimum setuptools version needed
 build-backend = "setuptools.build_meta" # The backend used to build the package (standard for setuptools)
 
 # Project metadata (PEP 621)
