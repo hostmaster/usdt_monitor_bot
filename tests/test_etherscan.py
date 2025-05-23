@@ -169,7 +169,6 @@ async def test_get_token_transactions_empty(etherscan_client_with_mocked_session
 async def test_get_token_transactions_rate_limit_eventually_fails(etherscan_client_with_mocked_session, mock_aiohttp_session):
     """Test rate limit error handling after retries."""
     client = etherscan_client_with_mocked_session
-    mock_session_get = mock_aiohttp_session.get
     
     # Configure the mock_response that is returned by mock_session_get().__aenter__()
     # to always indicate a rate limit error.
