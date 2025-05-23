@@ -4,7 +4,14 @@ import functools
 import logging
 import sqlite3
 from datetime import datetime, timezone
+from enum import Enum, auto
 from typing import List, Optional
+
+
+class WalletAddResult(Enum):
+    ADDED = auto()
+    ALREADY_EXISTS = auto()
+    DB_ERROR = auto()
 
 
 class DatabaseManager:
@@ -24,7 +31,9 @@ class DatabaseManager:
         commit: bool = False,
     ):
         conn = None
-        result = False  # Default for write operations
+        # For commit operations, we'll return rowcount on success, -1 on error.
+        # For fetch_one/fetch_all, result is data or None.
+        # For other operations (like CREATE), result is True/False.
         try:
             # Use a context manager for the connection
             with sqlite3.connect(
@@ -36,7 +45,7 @@ class DatabaseManager:
 
                 if commit:
                     conn.commit()
-                    result = cursor.rowcount > 0  # Rows affected
+                    result = cursor.rowcount  # Return actual rowcount
                 elif fetch_one:
                     result = cursor.fetchone()
                 elif fetch_all:
@@ -48,6 +57,8 @@ class DatabaseManager:
 
         except sqlite3.Error as e:
             logging.error(f"Database error: {e} | Query: {query} | Params: {params}")
+            if commit:
+                return -1 # Special value for error in commit operation
             return None if fetch_one or fetch_all else False
         # No finally needed, 'with' handles closing
 
@@ -119,21 +130,48 @@ class DatabaseManager:
         return result is not None
 
     # --- Wallet Operations (Sync versions for internal use) ---
-    def _add_wallet_sync(self, user_id: int, address: str) -> bool:
+    def _add_wallet_sync(self, user_id: int, address: str) -> WalletAddResult:
         address_lower = address.lower()
-        added_wallet = self._execute_db_query(
+        # Attempt to add to wallets table
+        rowcount = self._execute_db_query(
             "INSERT OR IGNORE INTO wallets (user_id, address) VALUES (?, ?)",
             (user_id, address_lower),
             commit=True,
         )
-        # Ensure address exists in tracked_addresses (lowercase)
-        self._execute_db_query(
-            "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
-            (address_lower,),
-            commit=True,
-        )
-        # Return True if the wallet was newly inserted, False if ignored/failed
-        return added_wallet
+
+        if rowcount > 0:
+            # Successfully inserted a new wallet, now ensure it's in tracked_addresses
+            tracked_rowcount = self._execute_db_query(
+                "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
+                (address_lower,),
+                commit=True,
+            )
+            if tracked_rowcount == -1: # Error adding to tracked_addresses
+                logging.error(
+                    f"DB error while ensuring {address_lower} is in tracked_addresses after adding to wallets table for user {user_id}."
+                )
+                # This is a tricky state. The wallet is added for the user, but tracking might fail.
+                # For now, report as ADDED because the primary user-facing operation succeeded.
+                # Consider a compensating transaction or more robust error handling here if critical.
+                return WalletAddResult.ADDED # Or a new specific error state
+            return WalletAddResult.ADDED
+        elif rowcount == 0:
+            # No rows affected means (user_id, address) already exists
+            # Still ensure it's in tracked_addresses, as it might have been added by another user
+            # and this user is just re-adding it.
+            tracked_rowcount = self._execute_db_query(
+                "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
+                (address_lower,),
+                commit=True,
+            )
+            if tracked_rowcount == -1: # Error adding to tracked_addresses
+                 logging.error(
+                    f"DB error while ensuring {address_lower} is in tracked_addresses for an ALREADY_EXISTS wallet for user {user_id}."
+                )
+                # If this fails, it's not critical for the "already exists" status for this user.
+            return WalletAddResult.ALREADY_EXISTS
+        else: # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
+            return WalletAddResult.DB_ERROR
 
     def _list_wallets_sync(self, user_id: int) -> Optional[List[str]]:
         results = self._execute_db_query(
@@ -211,7 +249,7 @@ class DatabaseManager:
     async def check_user_exists(self, user_id: int) -> bool:
         return await self._run_sync_db_operation(self._check_user_exists_sync, user_id)
 
-    async def add_wallet(self, user_id: int, address: str) -> bool:
+    async def add_wallet(self, user_id: int, address: str) -> WalletAddResult:
         return await self._run_sync_db_operation(
             self._add_wallet_sync, user_id, address
         )

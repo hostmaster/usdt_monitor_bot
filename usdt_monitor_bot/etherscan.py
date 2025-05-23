@@ -5,6 +5,13 @@ from typing import List
 
 import aiohttp
 from aiohttp import ClientTimeout
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 from usdt_monitor_bot.config import BotConfig
 
@@ -43,6 +50,17 @@ class EtherscanClient:
             await self._session.close()
             self._session = None
 
+    @retry(
+        stop=stop_after_attempt(5),  # Attempt 5 times in total (1 initial + 4 retries)
+        wait=wait_exponential(
+            multiplier=1, min=1, max=10
+        ),  # Waits 1s, 2s, 4s, 8s (max is 10 but won't be reached with 4 retries after first failure)
+        retry=retry_if_exception_type(
+            (EtherscanRateLimitError, aiohttp.ClientError, asyncio.TimeoutError)
+        ),
+        before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
+        reraise=True,  # Reraise the last exception if all retries fail
+    )
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
     ) -> List[dict]:
