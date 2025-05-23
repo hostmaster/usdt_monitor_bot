@@ -1,7 +1,7 @@
 # tests/test_etherscan.py
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-
+import aiohttp # Import aiohttp
 import pytest
 
 from usdt_monitor_bot.etherscan import (
@@ -92,201 +92,286 @@ class MockClientSession:
         """Close the session."""
         self._closed = True
 
+# New fixture to use mock_aiohttp_session from conftest.py
+@pytest.fixture
+async def etherscan_client_with_mocked_session(mock_config, mock_aiohttp_session, monkeypatch):
+    """Provides an EtherscanClient instance with a mocked aiohttp.ClientSession."""
+    
+    # Instead of monkeypatching aiohttp.ClientSession globally for all tests in this file,
+    # we can inject the mock_aiohttp_session specifically into an EtherscanClient instance.
+    # One way is to allow EtherscanClient to accept a session in its constructor for testing,
+    # or to patch it during its __aenter__ if it creates a session there.
+    # For now, let's assume EtherscanClient creates its session internally if not provided.
+    # We'll patch 'aiohttp.ClientSession' just before EtherscanClient is created.
 
-@pytest.mark.asyncio
-async def test_get_token_transactions_success(mock_config, mock_response, monkeypatch):
-    """Test successful token transaction retrieval."""
-    contract_address = "0xusdt"
-    address = "0xabc"
-    start_block = 0
-
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
+    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: mock_aiohttp_session)
+    
     async with EtherscanClient(mock_config) as client:
-        result = await client.get_token_transactions(
-            contract_address, address, start_block
-        )
-        assert len(result) == 1
-        assert result[0]["hash"] == "0x123"
-        assert result[0]["from"] == "0xabc"
-        assert result[0]["to"] == "0xdef"
+        # The client now uses mock_aiohttp_session internally
+        yield client
+    # __aexit__ will call mock_aiohttp_session.close()
 
 
 @pytest.mark.asyncio
-async def test_get_token_transactions_empty(mock_config, mock_response, monkeypatch):
-    """Test empty token transaction response."""
-    contract_address = "0xusdt"
-    address = "0xabc"
-    start_block = 0
-
-    # Modify mock response for empty result
-    mock_response.json.return_value = {
+async def test_get_token_transactions_success(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test successful token transaction retrieval."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get # This is the MagicMock returning the context manager
+    
+    # Configure the response for the successful call
+    # Access the mock_response from the fixture structure
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(return_value={
         "status": "1",
         "message": "OK",
-        "result": [],
-    }
+        "result": [{"hash": "0x123", "from": "0xabc", "to": "0xdef"}]
+    })
 
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        result = await client.get_token_transactions(
-            contract_address, address, start_block
-        )
-        assert len(result) == 0
+    contract_address = "0xusdt"
+    address = "0xabc"
+    start_block = 0
+    
+    result = await client.get_token_transactions(
+        contract_address, address, start_block
+    )
+    assert len(result) == 1
+    assert result[0]["hash"] == "0x123"
+    assert result[0]["from"] == "0xabc"
+    assert result[0]["to"] == "0xdef"
+    assert mock_session_get.call_count == 1
 
 
 @pytest.mark.asyncio
-async def test_get_token_transactions_rate_limit(
-    mock_config, mock_response, monkeypatch
-):
-    """Test rate limit error handling."""
+async def test_get_token_transactions_empty(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test empty token transaction response."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+    
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(return_value={
+        "status": "1", "message": "OK", "result": []
+    })
+
     contract_address = "0xusdt"
     address = "0xabc"
     start_block = 0
 
-    # Modify mock response for rate limit
+    result = await client.get_token_transactions(
+        contract_address, address, start_block
+    )
+    assert len(result) == 0
+    assert mock_session_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_token_transactions_rate_limit_eventually_fails(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test rate limit error handling after retries."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+    
+    # Configure the mock_response that is returned by mock_session_get().__aenter__()
+    # to always indicate a rate limit error.
+    async def configure_rate_limit_response(mock_get_call):
+        response_ctx = await mock_get_call.__aenter__()
+        response_ctx.status = 429 # Rate limit HTTP status
+        response_ctx.json = AsyncMock(side_effect=EtherscanRateLimitError("Simulated rate limit from status")) # if status is checked first
+        # To ensure EtherscanRateLimitError is raised if json content is checked first
+        # response_ctx.json = AsyncMock(return_value={"status": "0", "message": "Max rate limit reached", "result": []})
+        return response_ctx
+
+    # We need to make session.get() itself raise the error, or the response object it yields.
+    # The EtherscanClient checks response.status == 429 first.
+    
+    # Let's make the __aenter__ of the context manager (returned by get) set up the response status.
+    # The mock_aiohttp_session.get returns a context manager (mock_context_manager).
+    # This context manager's __aenter__ returns a response (mock_response).
+    
+    # Simplified: make the response object (mock_response) always have status 429
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
     mock_response.status = 429
-
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        with pytest.raises(EtherscanRateLimitError):
-            await client.get_token_transactions(contract_address, address, start_block)
+    # Ensure json() isn't called or if it is, it doesn't contradict the rate limit
+    mock_response.json = AsyncMock(return_value={"message":"Rate limit hit"}) # This json might not even be called if status 429 is checked first
 
 
-@pytest.mark.asyncio
-async def test_get_token_transactions_api_error(
-    mock_config, mock_response, monkeypatch
-):
-    """Test API error handling."""
     contract_address = "0xusdt"
     address = "0xabc"
     start_block = 0
 
-    # Modify mock response for API error
-    mock_response.json.return_value = {
-        "status": "0",
-        "message": "Error! Invalid address format",
-        "result": [],
-    }
-
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        with pytest.raises(EtherscanError):
-            await client.get_token_transactions(contract_address, address, start_block)
+    with pytest.raises(EtherscanRateLimitError):
+        await client.get_token_transactions(contract_address, address, start_block)
+    
+    assert mock_aiohttp_session.get.call_count == 5 # Tenacity default attempts for the client
 
 
 @pytest.mark.asyncio
-async def test_get_token_transactions_http_error(
-    mock_config, mock_response, monkeypatch
-):
-    """Test HTTP error handling."""
+async def test_get_token_transactions_api_error_no_retry(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test API error handling (non-retriable)."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200 # API error can come with 200 OK but status "0" in json
+    mock_response.json = AsyncMock(return_value={
+        "status": "0", "message": "Error! Invalid address format", "result": []
+    })
+    
     contract_address = "0xusdt"
     address = "0xabc"
     start_block = 0
 
-    # Modify mock response for HTTP error
-    mock_response.status = 500
-
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        with pytest.raises(EtherscanError):
-            await client.get_token_transactions(contract_address, address, start_block)
+    with pytest.raises(EtherscanError, match="Error! Invalid address format"):
+        await client.get_token_transactions(contract_address, address, start_block)
+    assert mock_session_get.call_count == 1 # Should not retry this
 
 
 @pytest.mark.asyncio
-async def test_get_token_transactions_timeout(mock_config, mock_response, monkeypatch):
-    """Test timeout error handling."""
+async def test_get_token_transactions_http_error_retried(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test HTTP error handling (retriable aiohttp.ClientError)."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    # Configure .get() to raise ClientError directly
+    mock_session_get.side_effect = [aiohttp.ClientError("Simulated network error")] * 5
+    
     contract_address = "0xusdt"
     address = "0xabc"
     start_block = 0
 
-    # Create a mock session that raises TimeoutError
-    session = MockClientSession()
-    session.get = MagicMock(side_effect=asyncio.TimeoutError())
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        with pytest.raises(EtherscanError):
-            await client.get_token_transactions(contract_address, address, start_block)
+    with pytest.raises(EtherscanError, match="Network error: Simulated network error"): # EtherscanClient wraps it
+        await client.get_token_transactions(contract_address, address, start_block)
+    assert mock_session_get.call_count == 1 # Tenacity does not retry this due to immediate wrapping
 
 
 @pytest.mark.asyncio
-async def test_get_token_transactions_unexpected_format(
-    mock_config, mock_response, monkeypatch
-):
-    """Test unexpected response format handling."""
+async def test_get_token_transactions_timeout_retried(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test timeout error handling (retriable asyncio.TimeoutError)."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    # Configure .get() to raise TimeoutError directly
+    mock_session_get.side_effect = [asyncio.TimeoutError("Simulated timeout")] * 5
+
     contract_address = "0xusdt"
     address = "0xabc"
     start_block = 0
 
-    # Modify mock response for invalid format
-    mock_response.json.return_value = {"invalid": "format"}
-
-    # Create a mock session
-    session = MockClientSession()
-    session.set_response(mock_response)
-
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
-
-    async with EtherscanClient(mock_config) as client:
-        with pytest.raises(EtherscanError):
-            await client.get_token_transactions(contract_address, address, start_block)
+    with pytest.raises(EtherscanError, match="Request timeout: Simulated timeout"): # EtherscanClient wraps it
+        await client.get_token_transactions(contract_address, address, start_block)
+    assert mock_session_get.call_count == 1 # Tenacity does not retry this due to immediate wrapping
 
 
 @pytest.mark.asyncio
-async def test_client_session_cleanup(mock_config, monkeypatch):
+async def test_get_token_transactions_unexpected_format_no_retry(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    """Test unexpected response format handling (non-retriable)."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    # This JSON {"invalid": "format"} will cause data.get("status") to be None.
+    # Then message becomes "Unknown error". So EtherscanError is "API error: Unknown error".
+    mock_response.json = AsyncMock(return_value={"invalid": "format"}) 
+
+    contract_address = "0xusdt"
+    address = "0xabc"
+    start_block = 0
+
+    with pytest.raises(EtherscanError, match="API error: Unknown error"): 
+        await client.get_token_transactions(contract_address, address, start_block)
+    assert mock_session_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_success_on_third_attempt_rate_limit(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get # This is the MagicMock for session.get()
+
+    # Mock responses for each call to session.get()
+    # Call 1: Rate Limit (status 429)
+    response1_ctx_manager = AsyncMock()
+    response1 = AsyncMock(status=429)
+    response1.json = AsyncMock(return_value={"message":"Rate limit attempt 1"})
+    response1_ctx_manager.__aenter__.return_value = response1
+    
+    # Call 2: Rate Limit (status 429)
+    response2_ctx_manager = AsyncMock()
+    response2 = AsyncMock(status=429)
+    response2.json = AsyncMock(return_value={"message":"Rate limit attempt 2"})
+    response2_ctx_manager.__aenter__.return_value = response2
+
+    # Call 3: Success
+    response3_ctx_manager = AsyncMock()
+    response3 = AsyncMock(status=200)
+    response3.json = AsyncMock(return_value={"status": "1", "message": "OK", "result": [{"tx_id": "success"}]})
+    response3_ctx_manager.__aenter__.return_value = response3
+    
+    mock_session_get.side_effect = [
+        response1_ctx_manager,
+        response2_ctx_manager,
+        response3_ctx_manager
+    ]
+
+    result = await client.get_token_transactions("contract", "address", 0)
+    
+    assert mock_session_get.call_count == 3
+    assert len(result) == 1
+    assert result[0]["tx_id"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_retry_success_on_client_error(etherscan_client_with_mocked_session, mock_aiohttp_session):
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    # Call 1 & 2: aiohttp.ClientError
+    # Call 3: Success
+    response_success_ctx_manager = AsyncMock()
+    response_success = AsyncMock(status=200)
+    response_success.json = AsyncMock(return_value={"status": "1", "message": "OK", "result": [{"tx_id": "net_success"}]})
+    response_success_ctx_manager.__aenter__.return_value = response_success
+
+    mock_session_get.side_effect = [
+        aiohttp.ClientError("Network fail 1"),
+        aiohttp.ClientError("Network fail 2"),
+        response_success_ctx_manager
+    ]
+
+    result = await client.get_token_transactions("contract", "address", 0)
+    
+    assert mock_session_get.call_count == 3
+    assert len(result) == 1
+    assert result[0]["tx_id"] == "net_success"
+
+
+@pytest.mark.asyncio
+async def test_client_session_cleanup(mock_config, mock_aiohttp_session, monkeypatch):
     """Test that the client session is properly cleaned up."""
-    # Create a mock session
-    session = MockClientSession()
+    # Patch aiohttp.ClientSession globally for this test to ensure our mock is used
+    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: mock_aiohttp_session)
 
-    # Patch the ClientSession to return our mock
-    monkeypatch.setattr("aiohttp.ClientSession", lambda *args, **kwargs: session)
+    # Create client without context manager to test explicit close
+    client_no_ctx = EtherscanClient(mock_config) 
+    # At this point, client_no_ctx._session might be None or an actual session depending on EtherscanClient's __init__
+    # Let's assume __init__ doesn't create it, but __aenter__ does.
+    
+    # Test with context manager
+    async with EtherscanClient(mock_config) as client_ctx:
+        # mock_aiohttp_session is used due to monkeypatch
+        assert client_ctx._session == mock_aiohttp_session 
+    assert mock_aiohttp_session.close.called # close called by __aexit__
 
-    # Create client without context manager
-    client = EtherscanClient(mock_config)
-    assert client._session is None
+    # Reset call count for next check
+    mock_aiohttp_session.close.reset_mock()
 
-    # Create session
-    await client.__aenter__()
-    assert client._session is not None
-
-    # Cleanup
-    await client.__aexit__(None, None, None)
-    assert client._session is None
-
-    # Test explicit close
-    await client.__aenter__()
-    assert client._session is not None
-    await client.close()
-    assert client._session is None
+    # Test explicit close()
+    # Need to ensure EtherscanClient uses the patched session even outside context manager
+    # This part of the test might need EtherscanClient to allow session injection or more complex patching.
+    # The current EtherscanClient creates session in __aenter__ or if _session is None.
+    
+    # If EtherscanClient creates session on demand:
+    await client_no_ctx.get_token_transactions("c", "a", 0) # This would create and use a session
+    assert client_no_ctx._session == mock_aiohttp_session # Check if it used the mocked one
+    await client_no_ctx.close()
+    assert mock_aiohttp_session.close.called

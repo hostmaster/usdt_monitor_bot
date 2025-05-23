@@ -13,6 +13,7 @@ VALID_ADDRESS_UPPER = "0x1234567890ABCDEF1234567890ABCDEF12345678"
 
 # Import handlers now
 # ruff: noqa: E402
+from usdt_monitor_bot.database import WalletAddResult # Import WalletAddResult
 from usdt_monitor_bot.handlers import (
     add_wallet_handler,
     command_help_handler,
@@ -79,36 +80,48 @@ async def test_add_wallet_success(
     mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
 ):
     mock_command_object.args = VALID_ADDRESS
-    mock_db_manager.add_wallet.return_value = True  # Simulate successful add
+    mock_db_manager.add_wallet.return_value = WalletAddResult.ADDED
 
     await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
 
     mock_db_manager.add_wallet.assert_awaited_once_with(
         mock_message.from_user.id, VALID_ADDRESS.lower()
     )
-    mock_message.reply.assert_awaited_once_with(ANY)
-    assert (
-        f"Now monitoring for incoming USDT transfers to: <code>{VALID_ADDRESS.lower()}</code>"
-        in mock_message.reply.call_args[0][0]
-    )
+    # Use hcode for consistency with handler's formatting
+    from aiogram.utils.markdown import hcode
+    expected_message = f"✅ Now monitoring for incoming USDT transfers to: {hcode(VALID_ADDRESS.lower())}"
+    mock_message.reply.assert_awaited_once_with(expected_message)
 
 
-async def test_add_wallet_duplicate_or_error(
+async def test_add_wallet_already_exists(
     mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
 ):
     mock_command_object.args = VALID_ADDRESS
-    mock_db_manager.add_wallet.return_value = False  # Simulate duplicate or DB error
+    mock_db_manager.add_wallet.return_value = WalletAddResult.ALREADY_EXISTS
 
     await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
 
     mock_db_manager.add_wallet.assert_awaited_once_with(
         mock_message.from_user.id, VALID_ADDRESS.lower()
     )
-    mock_message.reply.assert_awaited_once_with(ANY)
-    assert (
-        "already being monitored or a database error occurred"
-        in mock_message.reply.call_args[0][0]
+    from aiogram.utils.markdown import hcode
+    expected_message = f"ℹ️ Address {hcode(VALID_ADDRESS.lower())} is already in your monitoring list."
+    mock_message.reply.assert_awaited_once_with(expected_message)
+
+
+async def test_add_wallet_db_error(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    mock_command_object.args = VALID_ADDRESS
+    mock_db_manager.add_wallet.return_value = WalletAddResult.DB_ERROR
+
+    await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    mock_db_manager.add_wallet.assert_awaited_once_with(
+        mock_message.from_user.id, VALID_ADDRESS.lower()
     )
+    expected_message = "⚠️ An unexpected error occurred while adding the address. Please try again later."
+    mock_message.reply.assert_awaited_once_with(expected_message)
 
 
 async def test_add_wallet_invalid_address(

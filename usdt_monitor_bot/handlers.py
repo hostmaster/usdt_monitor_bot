@@ -9,7 +9,7 @@ from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 from aiogram.utils.markdown import hbold, hcode
 
-from usdt_monitor_bot.database import DatabaseManager
+from usdt_monitor_bot.database import DatabaseManager, WalletAddResult
 
 # --- Ethereum Address Validation ---
 ETH_ADDRESS_REGEX = re.compile(r"^0x[a-fA-F0-9]{40}$")
@@ -103,18 +103,28 @@ async def add_wallet_handler(
         return
 
     address_lower = address.lower()
-    success = await db_manager.add_wallet(user.id, address_lower)
+    status = await db_manager.add_wallet(user.id, address_lower)
 
-    if success:
+    if status == WalletAddResult.ADDED:
         await message.reply(
             f"✅ Now monitoring for incoming USDT transfers to: {hcode(address_lower)}"
         )
         logging.info(f"User {user.id} added wallet: {address_lower}")
-    else:
-        # Could be duplicate or DB error, check logs for specifics
+    elif status == WalletAddResult.ALREADY_EXISTS:
         await message.reply(
-            f"⚠️ Address {hcode(address_lower)} is already being monitored or a database error occurred."
+            f"ℹ️ Address {hcode(address_lower)} is already in your monitoring list."
         )
+        logging.info(f"User {user.id} attempted to add existing wallet: {address_lower}")
+    elif status == WalletAddResult.DB_ERROR:
+        await message.reply(
+            "⚠️ An unexpected error occurred while adding the address. Please try again later."
+        )
+        logging.error(f"DB_ERROR while user {user.id} attempted to add wallet: {address_lower}")
+    else: # Should not happen with the defined Enum
+        await message.reply(
+            "⚠️ An unknown issue occurred. Please try again."
+        )
+        logging.error(f"Unknown WalletAddResult status {status} for user {user.id}, address {address_lower}")
 
 
 @router.message(Command("list"), F.chat.type == "private")
