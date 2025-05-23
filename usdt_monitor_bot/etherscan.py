@@ -3,7 +3,6 @@ import asyncio
 import logging
 from typing import List
 
-import asyncio
 import aiohttp
 from aiohttp import ClientTimeout
 from tenacity import (
