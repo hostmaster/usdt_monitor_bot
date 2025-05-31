@@ -50,7 +50,7 @@ dependencies = [
 test = [
     "pytest==8.3.5",
     "pytest-asyncio==0.26.0",
-    "pytest-mock==3.14.0",
+    "pytest-mock==3.14.1",
 ]
 dev = [
     "usdt-monitor-bot[test]", # Include test dependencies in dev
