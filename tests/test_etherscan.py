@@ -238,9 +238,9 @@ async def test_get_token_transactions_http_error_retried(etherscan_client_with_m
     address = "0xabc"
     start_block = 0
 
-    with pytest.raises(EtherscanError, match="Network error: Simulated network error"): # EtherscanClient wraps it
+    with pytest.raises(aiohttp.ClientError, match="Simulated network error"):
         await client.get_token_transactions(contract_address, address, start_block)
-    assert mock_session_get.call_count == 1 # Tenacity does not retry this due to immediate wrapping
+    assert mock_session_get.call_count == 5
 
 
 @pytest.mark.asyncio
@@ -256,9 +256,9 @@ async def test_get_token_transactions_timeout_retried(etherscan_client_with_mock
     address = "0xabc"
     start_block = 0
 
-    with pytest.raises(EtherscanError, match="Request timeout: Simulated timeout"): # EtherscanClient wraps it
+    with pytest.raises(asyncio.TimeoutError, match="Simulated timeout"):
         await client.get_token_transactions(contract_address, address, start_block)
-    assert mock_session_get.call_count == 1 # Tenacity does not retry this due to immediate wrapping
+    assert mock_session_get.call_count == 5
 
 
 @pytest.mark.asyncio
