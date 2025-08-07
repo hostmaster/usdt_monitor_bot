@@ -46,7 +46,7 @@ LIST_WALLETS_EMPTY = "ℹ️ You are not currently monitoring any addresses. Use
 def format_wallet_list(wallets: list[str]) -> str:
     """Formats the list of monitored wallets."""
     header = f"{hbold('Your monitored wallets (for USDT):')}"
-    items = [f" L {hcode(addr)}" for addr in wallets]
+    items = [f"• {hcode(addr)}" for addr in wallets]
     return "\n".join([header] + items)
 
 # --- /remove Command ---
