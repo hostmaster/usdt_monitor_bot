@@ -93,30 +93,33 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
 
+        # The @retry decorator will handle ClientError and TimeoutError.
+        # We only need to catch other exceptions like JSON decoding errors.
         try:
             async with self._session.get(self._base_url, params=params) as response:
                 if response.status == 429:  # Too Many Requests
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
+                    # Don't retry on other client/server errors, raise immediately.
                     raise EtherscanError(
                         f"API request failed with status {response.status}"
                     )
 
                 data = await response.json()
+
+                # Etherscan API returns status '0' for errors, '1' for success.
                 if data.get("status") != "1":
                     message = data.get("message", "Unknown error")
+                    # Explicitly check for rate limit messages in the response body
                     if "rate limit" in message.lower():
                         raise EtherscanRateLimitError(message)
+                    # For other API-level errors (e.g., "Invalid API Key"), raise a generic EtherscanError.
                     raise EtherscanError(f"API error: {message}")
 
                 return data.get("result", [])
 
-        except aiohttp.ClientError as e:
-            raise EtherscanError(f"Network error: {e}") from e
-        except asyncio.TimeoutError as e:
-            raise EtherscanError(f"Request timeout: {e}") from e
-        except ValueError as e:
+        except ValueError as e:  # Catches JSON decoding errors
             raise EtherscanError(f"Invalid JSON response: {e}") from e
 
     async def close(self):
