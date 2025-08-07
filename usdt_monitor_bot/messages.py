@@ -41,7 +41,7 @@ def add_wallet_already_exists(address: str) -> str:
 
 # --- /list Command ---
 LIST_WALLETS_ERROR = "⚠️ An error occurred while fetching your wallet list. Please try again later."
-LIST_WALLELS_EMPTY = "ℹ️ You are not currently monitoring any addresses. Use /add to start."
+LIST_WALLETS_EMPTY = "ℹ️ You are not currently monitoring any addresses. Use /add to start."
 
 def format_wallet_list(wallets: list[str]) -> str:
     """Formats the list of monitored wallets."""
