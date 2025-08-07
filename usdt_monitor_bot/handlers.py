@@ -121,7 +121,7 @@ async def list_wallets_handler(message: Message, db_manager: DatabaseManager):
         await message.reply(messages.LIST_WALLETS_ERROR)
         logging.error(f"Failed to retrieve wallet list for user {user.id}")
     elif not user_wallets:
-        await message.reply(messages.LIST_WALLETS_EMPTY)
+        await message.reply(messages.LIST_WALLELS_EMPTY)
     else:
         await message.reply(messages.format_wallet_list(user_wallets))
 

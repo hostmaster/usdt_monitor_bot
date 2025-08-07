@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import List
 
 import aiohttp  # Import needed if creating session here or for type hints
 

@@ -1,5 +1,4 @@
 # tests/test_checker.py
-import unittest.mock
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
