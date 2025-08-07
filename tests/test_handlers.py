@@ -148,7 +148,7 @@ async def test_list_wallets_empty(mock_message: AsyncMock, mock_db_manager: Asyn
     await list_wallets_handler(mock_message, mock_db_manager)
 
     mock_db_manager.list_wallets.assert_awaited_once_with(mock_message.from_user.id)
-    mock_message.reply.assert_awaited_once_with(messages.LIST_WALLELS_EMPTY)
+    mock_message.reply.assert_awaited_once_with(messages.LIST_WALLETS_EMPTY)
 
 
 async def test_list_wallets_success(
