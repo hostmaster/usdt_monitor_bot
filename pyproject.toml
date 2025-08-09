@@ -39,7 +39,7 @@ keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "cryp
 # especially for Docker builds relying on requirements.txt.
 dependencies = [
     "aiogram==3.21.0",      # Core bot framework
-    "aiohttp==3.12.14",      # For async HTTP requests (Etherscan)
+    "aiohttp==3.12.15",      # For async HTTP requests (Etherscan)
     "apscheduler==3.11.0",  # For scheduled tasks (monitoring job)
     "python-dotenv==1.1.1", # Optional: For loading .env file locally (good practice)
     "tenacity==9.1.2"      # For retry mechanisms
