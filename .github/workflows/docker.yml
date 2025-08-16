@@ -21,7 +21,7 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: |
           echo "GIT_COMMIT=$(git rev-parse --short ${{ github.sha }})" >> $GITHUB_ENV
 
