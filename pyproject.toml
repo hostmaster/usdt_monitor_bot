@@ -54,7 +54,7 @@ test = [
 ]
 dev = [
     "usdt-monitor-bot[test]", # Include test dependencies in dev
-    "ruff==0.12.12",           # Linter (optional)
+    "ruff==0.13.0",           # Linter (optional)
     # Add other development tools here
 ]
 
