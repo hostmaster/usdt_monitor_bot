@@ -40,7 +40,7 @@ keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "cryp
 dependencies = [
     "aiogram==3.22.0",      # Core bot framework
     "aiohttp==3.13.2",      # For async HTTP requests (Etherscan)
-    "apscheduler==3.11.0",  # For scheduled tasks (monitoring job)
+    "apscheduler==3.11.1",  # For scheduled tasks (monitoring job)
     "python-dotenv==1.2.1", # Optional: For loading .env file locally (good practice)
     "tenacity==9.1.2"      # For retry mechanisms
 ]
