@@ -32,8 +32,6 @@ classifiers = [ # Standard classifiers for PyPI (optional but good practice)
 keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "crypto", "monitoring"]
 
 # Project dependencies (runtime)
-# NOTE: Keep this in sync with requirements.txt if using both,
-# especially for Docker builds relying on requirements.txt.
 dependencies = [
     "aiogram==3.22.0",      # Core bot framework
     "apscheduler==3.11.1",  # For scheduled tasks (monitoring job)
