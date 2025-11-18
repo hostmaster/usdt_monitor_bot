@@ -10,8 +10,10 @@ WORKDIR /app
 
 # Copy dependency files first for better layer caching
 COPY pyproject.toml .
-COPY usdt_monitor_bot/__init__.py usdt_monitor_bot/
-RUN uv pip install --system --no-cache .
+# Compile dependencies from pyproject.toml to requirements.txt, install, and clean up
+RUN uv pip compile pyproject.toml --output-file requirements.txt && \
+    uv pip install --system --no-cache -r requirements.txt && \
+    rm requirements.txt
 
 # Copy the rest of the application code
 COPY usdt_monitor_bot/ usdt_monitor_bot/
