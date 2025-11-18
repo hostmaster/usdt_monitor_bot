@@ -3,11 +3,17 @@ FROM python:3.11-alpine
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy dependency files first for better layer caching
+COPY pyproject.toml .
+COPY usdt_monitor_bot/__init__.py usdt_monitor_bot/
+RUN uv pip install --system --no-cache .
 
+# Copy the rest of the application code
 COPY usdt_monitor_bot/ usdt_monitor_bot/
 
 WORKDIR /app

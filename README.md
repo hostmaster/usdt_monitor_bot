@@ -69,7 +69,7 @@ usdt_monitor_bot/
 3. Install dependencies:
 
    ```bash
-   pip install -r requirements.txt
+   uv pip install .
    ```
 
 4. Run the bot:
