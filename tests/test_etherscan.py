@@ -31,7 +31,7 @@ SAMPLE_TX = {
 def mock_config():
     """Create a mock config object."""
     config = MagicMock()
-    config.etherscan_base_url = "https://api.etherscan.io/api"
+    config.etherscan_base_url = "https://api.etherscan.io/v2/api"
     config.etherscan_api_key = "test_api_key"
     config.telegram_bot_token = "test_bot_token"
     config.db_path = "test.db"

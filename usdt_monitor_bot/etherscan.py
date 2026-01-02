@@ -83,6 +83,7 @@ class EtherscanClient:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
 
         params = {
+            "chainid": "1",  # Ethereum mainnet - required for V2 API
             "module": "account",
             "action": "tokentx",
             "address": address,

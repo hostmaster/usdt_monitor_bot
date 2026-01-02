@@ -48,3 +48,9 @@ tasks:
     cmds:
       - rsync -va -z .env $TARGET_HOST:tracker/
       - rsync -va -z docker-compose.prod.yml $TARGET_HOST:tracker/compose.yaml
+
+  test:
+    desc: Run tests
+    cmds:
+      - pip install -e ".[test]"
+      - pytest tests/ -v

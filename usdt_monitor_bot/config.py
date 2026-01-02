@@ -28,7 +28,7 @@ class BotConfig:
         telegram_bot_token: str,
         etherscan_api_key: str,
         db_path: str = os.path.join(DATA_DIR, "usdt_monitor.db"),
-        etherscan_base_url: str = "https://api.etherscan.io/api",
+        etherscan_base_url: str = "https://api.etherscan.io/v2/api",
         etherscan_request_delay: float = 0.2,
         check_interval_seconds: int = 60,
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
@@ -129,7 +129,7 @@ def load_config() -> BotConfig:
         db_path = default_db_path
         logging.info(f"DB_PATH: Using default value ('{db_path}').")
 
-    default_etherscan_base_url = "https://api.etherscan.io/api"
+    default_etherscan_base_url = "https://api.etherscan.io/v2/api"
     etherscan_base_url_env = os.getenv("ETHERSCAN_BASE_URL")
     if etherscan_base_url_env:
         etherscan_base_url = etherscan_base_url_env
@@ -215,7 +215,7 @@ def load_config() -> BotConfig:
         final_usdt_contract = usdt_contract_address_env
         source_usdt_contract = "environment"
     logging.info(f"USDT_CONTRACT_ADDRESS: Using {source_usdt_contract} value ('{final_usdt_contract}').")
-    
+
     final_usdt_decimals = default_usdt_decimals
     source_usdt_decimals = "default"
     if usdt_decimals_env:
@@ -269,6 +269,6 @@ def load_config() -> BotConfig:
             explorer_url=f"https://etherscan.io/token/{final_usdc_contract}",
         )
         config.token_registry.register_token(usdc_config) # Overwrites the default one
-    
+
     logging.info("--- Configuration Loading Complete ---")
     return config
