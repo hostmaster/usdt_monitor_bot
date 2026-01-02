@@ -57,3 +57,5 @@ jobs:
           cache-to: type=gha,mode=max
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
+          # BuildKit is enabled by default with setup-buildx-action
+          # This ensures cache mounts (like uv cache) work properly

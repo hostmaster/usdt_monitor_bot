@@ -8,15 +8,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy dependency files first for better layer caching
+# Copy dependency files and source code for installation
 COPY pyproject.toml .
-# Compile dependencies from pyproject.toml to requirements.txt, install, and clean up
-RUN uv pip compile pyproject.toml --output-file requirements.txt && \
-    uv pip install --system --no-cache -r requirements.txt && \
-    rm requirements.txt
-
-# Copy the rest of the application code
 COPY usdt_monitor_bot/ usdt_monitor_bot/
+# Install dependencies directly from pyproject.toml
+# Using BuildKit cache mount to persist uv's cache between builds
+# This cache persists across builds in CI/CD, significantly speeding up dependency installation
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system .
 
 WORKDIR /app
 

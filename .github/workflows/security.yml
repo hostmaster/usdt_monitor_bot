@@ -26,7 +26,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system bandit safety
+          uv pip install --system -e ".[security]"
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/
