@@ -52,5 +52,5 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - pip install -e ".[test]"
+      - uv pip install --system -e ".[test]
       - pytest tests/ -v

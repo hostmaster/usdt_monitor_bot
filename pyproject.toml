@@ -15,7 +15,7 @@ authors = [
     { name = "Your Name", email = "your.email@example.com" }, # Replace with your details
 ]
 license = { text = "MIT" } # Or specify file = "LICENSE" if you have a LICENSE file
-requires-python = ">=3.11" # Based on usage of asyncio.to_thread
+requires-python = ">=3.14" # Based on usage of asyncio.to_thread
 classifiers = [ # Standard classifiers for PyPI (optional but good practice)
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -23,8 +23,7 @@ classifiers = [ # Standard classifiers for PyPI (optional but good practice)
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Communications :: Chat",
     "Topic :: Internet",
     "Topic :: Software Development :: Libraries :: Python Modules",
