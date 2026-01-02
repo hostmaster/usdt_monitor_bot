@@ -6,11 +6,11 @@ from typing import List
 import aiohttp
 from aiohttp import ClientTimeout
 from tenacity import (
+    before_sleep_log,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
 )
 
 from usdt_monitor_bot.config import BotConfig
@@ -111,11 +111,28 @@ class EtherscanClient:
                 # Etherscan API returns status '0' for errors, '1' for success.
                 if data.get("status") != "1":
                     message = data.get("message", "Unknown error")
+                    result = data.get("result", "")
+
                     # Explicitly check for rate limit messages in the response body
                     if "rate limit" in message.lower():
                         raise EtherscanRateLimitError(message)
+
+                    # Handle common "NOTOK" cases with more context
+                    error_details = f"API error: {message}"
+                    if message == "NOTOK":
+                        # NOTOK can mean query timeout, invalid params, or other issues
+                        # Include additional context from result if available
+                        if result and isinstance(result, str):
+                            error_details = f"API error: {message} - {result}"
+                        else:
+                            error_details = (
+                                f"API error: {message} (possible query timeout or invalid parameters). "
+                                f"Contract: {contract_address[:10]}..., Address: {address[:10]}..., "
+                                f"Start block: {start_block}"
+                            )
+
                     # For other API-level errors (e.g., "Invalid API Key"), raise a generic EtherscanError.
-                    raise EtherscanError(f"API error: {message}")
+                    raise EtherscanError(error_details)
 
                 return data.get("result", [])
 

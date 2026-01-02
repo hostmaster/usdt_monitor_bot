@@ -60,10 +60,19 @@ class TransactionChecker:
                     "Some transactions may be missed in this cycle."
                 )
             except EtherscanError as e:
-                if "No transactions found" not in str(e):
-                    logging.error(
-                        f"Error fetching {token.symbol} transactions for {address_lower}: {e}"
-                    )
+                error_msg = str(e)
+                # Skip logging for "No transactions found" as it's expected for addresses without activity
+                if "No transactions found" not in error_msg:
+                    # For NOTOK errors, provide more context
+                    if "NOTOK" in error_msg:
+                        logging.warning(
+                            f"Error checking {token.symbol} transactions for {address_lower}: {error_msg}. "
+                            f"This may indicate a query timeout or API issue. The address will be retried in the next cycle."
+                        )
+                    else:
+                        logging.error(
+                            f"Error checking {token.symbol} transactions for {address_lower}: {error_msg}"
+                        )
             except Exception as e:
                 logging.error(
                     f"Unexpected error fetching {token.symbol} for {address_lower}: {e}",
@@ -131,7 +140,7 @@ class TransactionChecker:
                     f"Unexpected error during single tx processing {tx.get('hash', 'N/A')}: {e}",
                     exc_info=True,
                 )
-        
+
         if notifications_sent > 0:
             logging.info(
                 f"Sent {notifications_sent} notifications for {address_lower}."
@@ -163,7 +172,7 @@ class TransactionChecker:
         else:
             logging.info(f"Processing {len(processing_batch)} new tx(s) for {address_lower}")
             await self._send_notifications_for_batch(user_ids, processing_batch, address_lower)
-        
+
         return max(start_block, max_seen_block)
 
     async def check_all_addresses(self):
@@ -181,7 +190,7 @@ class TransactionChecker:
             try:
                 await asyncio.sleep(self._config.etherscan_request_delay)
                 start_block = await self._db.get_last_checked_block(address_lower)
-                
+
                 logging.info(f"Checking {address_lower} from block {start_block + 1}")
 
                 raw_transactions = await self._fetch_transactions_for_address(
