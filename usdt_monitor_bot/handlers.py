@@ -1,13 +1,22 @@
-# handlers.py
+"""
+Telegram bot handlers module.
+
+Defines command handlers for the Telegram bot including /start, /help,
+/add, /list, and /remove commands.
+"""
+
+# Standard library
 import logging
 import re
 from typing import Optional
 
+# Third-party
 from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
+# Local
 from usdt_monitor_bot import messages
 from usdt_monitor_bot.database import DatabaseManager, WalletAddResult
 

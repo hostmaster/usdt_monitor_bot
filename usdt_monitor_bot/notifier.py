@@ -1,12 +1,23 @@
-# notifier.py
+"""
+Notification service module.
+
+Handles formatting and sending Telegram notifications for token transactions,
+including spam risk warnings.
+"""
+
+# Standard library
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
+# Third-party
 from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.utils.markdown import hbold, hcode, hlink
 
+# Local
 from usdt_monitor_bot.config import BotConfig, TokenConfig
+from usdt_monitor_bot.spam_detector import RiskAnalysis
 
 # Constants
 ALLOWED_FUTURE_TIME_SECONDS = 3600  # 1 hour in seconds, for clock drift tolerance
@@ -28,6 +39,7 @@ class NotificationService:
         token_config: TokenConfig,
         is_incoming: bool,
         timestamp: int,
+        risk_analysis: Optional[RiskAnalysis] = None,
     ) -> str:
         """Format a token transaction notification message.
 
@@ -136,6 +148,22 @@ class NotificationService:
             # Determine the direction label
             address_label = "From" if is_incoming else "To"
 
+            # Add risk warning if transaction is suspicious
+            risk_warning = ""
+            if risk_analysis and risk_analysis.is_suspicious:
+                risk_warning = (
+                    "\n\n"
+                    f"⚠️ {hbold('SPAM RISK DETECTED')} ⚠️\n"
+                    f"Risk Score: {risk_analysis.score}/100\n"
+                )
+                if risk_analysis.flags:
+                    flags_text = ", ".join(
+                        [flag.value for flag in risk_analysis.flags[:3]]
+                    )  # Show first 3 flags
+                    risk_warning += f"Flags: {flags_text}\n"
+                if risk_analysis.recommendation:
+                    risk_warning += f"\n{risk_analysis.recommendation}\n"
+
             # Construct the message with proper error handling
             try:
                 message = (
@@ -144,6 +172,7 @@ class NotificationService:
                     f"{address_label}: {hcode(address_to_show)}\n"
                     f"Time: {formatted_time}\n"
                     f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
+                    f"{risk_warning}"
                 )
                 return message
             except Exception as e:
@@ -164,6 +193,7 @@ class NotificationService:
         tx: dict,
         token_type: str,
         monitored_address: str,
+        risk_analysis: Optional[RiskAnalysis] = None,
     ) -> None:
         """
         Send a notification for a token transaction.
@@ -218,11 +248,12 @@ class NotificationService:
             # Format the message using token-specific configuration
             message = self._format_token_message(
                 tx_data["hash"],
-                address_to_show, # This is already correctly selected
+                address_to_show,  # This is already correctly selected
                 float(tx_data["value"]),
                 token_config,
                 is_incoming,
                 int(tx_data["timeStamp"]),
+                risk_analysis,
             )
 
             # Only send the message if it was successfully formatted
