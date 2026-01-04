@@ -87,6 +87,7 @@ async def notify_suspicious_transaction(tx, analysis):
     message += f"\n⚠️ {analysis.recommendation}"
 
     # Send to all monitoring users
+    # Note: In aiogram, use bot.send_message() with chat_id parameter
     for user_id in get_monitoring_users():
         await bot.send_message(
             chat_id=user_id,
@@ -143,28 +144,52 @@ def store_transaction_risk(tx_hash, analysis):
 ## Step 6: Add Telegram Commands (Optional but Recommended)
 
 ```python
-async def cmd_suspicious(update, context):
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import Message
+
+# Create a router for spam detection commands
+spam_router = Router()
+
+@spam_router.message(Command("suspicious"), F.chat.type == "private")
+async def cmd_suspicious(message: Message, db_manager: DatabaseManager):
     """Show recent suspicious transactions"""
 
-    cursor = db.cursor()
-    cursor.execute(
-        """
-        SELECT tx_hash, sender_address, risk_score
-        FROM transactions
-        WHERE is_suspicious = TRUE
-        ORDER BY timestamp DESC LIMIT 5
-        """
-    )
+    # Get monitored address for the user (simplified - adjust based on your logic)
+    user_id = message.from_user.id
+    user_wallets = await db_manager.list_wallets(user_id)
 
-    message = "🚨 **Recent Suspicious Transactions**\n\n"
-    for tx_hash, sender, score in cursor.fetchall():
-        message += f"Score: {score} | `{sender}`\n"
+    if not user_wallets:
+        await message.reply("❌ No addresses being monitored. Use /add to add an address.")
+        return
 
-    await update.message.reply_text(message, parse_mode='Markdown')
+    # Get suspicious transactions for the first monitored address
+    # In production, you might want to show for all addresses or let user choose
+    monitored_address = user_wallets[0]
+    transactions = await db_manager.get_recent_transactions(monitored_address, limit=20)
+
+    # Filter suspicious transactions (risk_score >= 50)
+    suspicious = [tx for tx in transactions if tx.get("risk_score", 0) >= 50]
+
+    if not suspicious:
+        await message.reply("✅ No suspicious transactions detected!")
+        return
+
+    msg = "🚨 **Recent Suspicious Transactions**\n\n"
+    for tx in suspicious[:5]:  # Show top 5
+        tx_hash = tx["tx_hash"]
+        sender = tx["from_address"]
+        score = tx.get("risk_score", 0)
+        msg += f"Score: {score} | `{sender[:10]}...`\n"
+
+    await message.reply(msg, parse_mode='Markdown')
 
 
-# Add to application handlers
-application.add_handler(CommandHandler("suspicious", cmd_suspicious))
+# Register the router in your handlers.py
+# In handlers.py, add to register_handlers function:
+def register_handlers(dp: Dispatcher, db_manager: DatabaseManager):
+    # ... existing handlers ...
+    dp.include_router(spam_router)  # Add this line
 ```
 
 ---

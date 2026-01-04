@@ -15,7 +15,7 @@ ALTER TABLE transactions ADD COLUMN (
     time_since_prev_tx INTEGER,
     detection_reason VARCHAR(500),
     flagged_at TIMESTAMP,
-    
+
     INDEX idx_risk_score (risk_score),
     INDEX idx_is_suspicious (is_suspicious),
     INDEX idx_flagged_at (flagged_at)
@@ -32,7 +32,7 @@ CREATE TABLE suspicious_addresses (
     is_confirmed_malicious BOOLEAN DEFAULT FALSE,
     notes TEXT,
     reported_by VARCHAR(50),
-    
+
     INDEX idx_address (address),
     INDEX idx_threat_level (threat_level)
 );
@@ -44,7 +44,7 @@ CREATE TABLE trusted_addresses (
     label VARCHAR(100),
     added_by VARCHAR(50),
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     INDEX idx_address (address)
 );
 ```
@@ -160,10 +160,10 @@ class USDTMonitorEnhanced:
         cursor = self.db.cursor()
         cursor.execute(
             """
-            INSERT INTO transactions 
-            (tx_hash, sender_address, value, block_number, timestamp, 
+            INSERT INTO transactions
+            (tx_hash, sender_address, value, block_number, timestamp,
              risk_score, risk_flags, is_suspicious, detection_reason)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tx.tx_hash,
@@ -194,7 +194,7 @@ class USDTMonitorEnhanced:
         """Check if we've seen this address before"""
         cursor = self.db.cursor()
         cursor.execute(
-            "SELECT COUNT(*) FROM transactions WHERE sender_address = %s",
+            "SELECT COUNT(*) FROM transactions WHERE sender_address = ?",
             (address,)
         )
         return cursor.fetchone()[0] == 0
@@ -210,9 +210,9 @@ class USDTMonitorEnhanced:
             """
             SELECT tx_hash, sender_address, value, block_number, timestamp
             FROM transactions
-            WHERE recipient_address = %s
+            WHERE recipient_address = ?
             ORDER BY timestamp DESC
-            LIMIT %s
+            LIMIT ?
             """,
             (address, limit)
         )
@@ -245,7 +245,7 @@ async def handle_suspicious_transactions(update, context):
     /suspicious - Show recent suspicious transactions
     """
     user_id = update.effective_user.id
-    
+
     cursor = db.cursor()
     cursor.execute(
         """
@@ -256,12 +256,12 @@ async def handle_suspicious_transactions(update, context):
         LIMIT 10
         """
     )
-    
+
     rows = cursor.fetchall()
     if not rows:
         await update.message.reply_text("✅ No suspicious transactions detected!")
         return
-    
+
     message = "🚨 **Recent Suspicious Transactions:**\n\n"
     for tx_hash, sender, value, score, reason, timestamp in rows:
         message += (
@@ -271,7 +271,7 @@ async def handle_suspicious_transactions(update, context):
             f"Hash: `{tx_hash}`\n"
             f"Time: {timestamp}\n\n"
         )
-    
+
     await update.message.reply_text(message, parse_mode='Markdown')
 
 
@@ -285,22 +285,22 @@ async def handle_whitelist_address(update, context):
             "Example: /whitelist 0x123abc..."
         )
         return
-    
+
     address = context.args[0].lower()
-    
+
     # Validate address format
     if not address.startswith('0x') or len(address) != 42:
         await update.message.reply_text("❌ Invalid Ethereum address format")
         return
-    
+
     cursor = db.cursor()
     try:
         cursor.execute(
-            "INSERT INTO trusted_addresses (address, label) VALUES (%s, %s)",
+            "INSERT INTO trusted_addresses (address, label) VALUES (?, ?)",
             (address, f"Whitelisted by user {update.effective_user.id}")
         )
         db.commit()
-        
+
         await update.message.reply_text(
             f"✅ Address whitelisted:\n`{address}`",
             parse_mode='Markdown'
@@ -319,39 +319,39 @@ async def handle_report_spam(update, context):
             "Example: /report 0xabc123..."
         )
         return
-    
+
     tx_hash = context.args[0].lower()
     user_id = str(update.effective_user.id)
-    
+
     cursor = db.cursor()
-    
+
     # Get transaction details
     cursor.execute(
-        "SELECT sender_address, value FROM transactions WHERE tx_hash = %s",
+        "SELECT sender_address, value FROM transactions WHERE tx_hash = ?",
         (tx_hash,)
     )
-    
+
     result = cursor.fetchone()
     if not result:
         await update.message.reply_text("❌ Transaction not found")
         return
-    
+
     sender_address, value = result
-    
+
     # Add to suspicious addresses
     cursor.execute(
         """
-        INSERT INTO suspicious_addresses 
+        INSERT INTO suspicious_addresses
         (address, threat_level, reported_by, notes)
-        VALUES (%s, %s, %s, %s)
+        VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
         threat_level = 'CRITICAL',
-        reported_by = %s
+        reported_by = ?
         """,
         (sender_address, 'CRITICAL', user_id, f"Reported via /report command", user_id)
     )
     db.commit()
-    
+
     await update.message.reply_text(
         f"✅ Transaction reported as malicious\n"
         f"Address: `{sender_address}`\n"
@@ -367,30 +367,30 @@ async def handle_check_address(update, context):
     if not context.args:
         await update.message.reply_text("Usage: /check <address>")
         return
-    
+
     address = context.args[0].lower()
-    
+
     cursor = db.cursor()
-    
+
     # Check if in whitelist
     cursor.execute(
-        "SELECT label FROM trusted_addresses WHERE address = %s",
+        "SELECT label FROM trusted_addresses WHERE address = ?",
         (address,)
     )
-    
+
     if cursor.fetchone():
         await update.message.reply_text(
             f"✅ **TRUSTED ADDRESS**\n`{address}`",
             parse_mode='Markdown'
         )
         return
-    
+
     # Check if suspicious
     cursor.execute(
-        "SELECT risk_score, threat_level FROM suspicious_addresses WHERE address = %s",
+        "SELECT risk_score, threat_level FROM suspicious_addresses WHERE address = ?",
         (address,)
     )
-    
+
     result = cursor.fetchone()
     if result:
         score, threat = result
@@ -402,7 +402,7 @@ async def handle_check_address(update, context):
             parse_mode='Markdown'
         )
         return
-    
+
     await update.message.reply_text(
         f"⚠️ **UNKNOWN ADDRESS**\n"
         f"Not on whitelist or reported list\n"
@@ -434,30 +434,30 @@ async def handle_config_risk(update, context):
             "/risk_config dust 0.50 - Set dust threshold to $0.50\n"
             "/risk_config threshold 60 - Set risk score threshold to 60"
         )
-        
+
         await update.message.reply_text(message, parse_mode='Markdown')
         return
-    
+
     param = context.args[0].lower()
-    
+
     if len(context.args) < 2:
         await update.message.reply_text("❌ Please provide a value")
         return
-    
+
     value = context.args[1]
-    
+
     try:
         if param == 'dust':
             detector.config['dust_threshold_usd'] = float(value)
             await update.message.reply_text(f"✅ Dust threshold set to ${value}")
-        
+
         elif param == 'threshold':
             detector.config['suspicious_score_threshold'] = int(value)
             await update.message.reply_text(f"✅ Risk threshold set to {value}/100")
-        
+
         else:
             await update.message.reply_text("❌ Unknown parameter")
-    
+
     except ValueError:
         await update.message.reply_text("❌ Invalid value")
 ```
@@ -474,27 +474,27 @@ async def generate_risk_report(start_date, end_date):
     cursor = db.cursor()
     cursor.execute(
         """
-        SELECT 
+        SELECT
             DATE(timestamp) as date,
             COUNT(*) as total_txs,
             SUM(CASE WHEN is_suspicious THEN 1 ELSE 0 END) as suspicious_txs,
             AVG(risk_score) as avg_risk,
             MAX(risk_score) as max_risk
         FROM transactions
-        WHERE timestamp BETWEEN %s AND %s
+        WHERE timestamp BETWEEN ? AND ?
         GROUP BY DATE(timestamp)
         """,
         (start_date, end_date)
     )
-    
+
     report = "📊 **Risk Report** 📊\n\n"
     report += "Date | Total | Suspicious | Avg Risk | Max Risk\n"
     report += "---|---|---|---|---\n"
-    
+
     for date, total, suspicious, avg_risk, max_risk in cursor.fetchall():
         pct = (suspicious/total * 100) if total > 0 else 0
         report += f"{date} | {total} | {suspicious} ({pct:.1f}%) | {avg_risk:.0f} | {max_risk}\n"
-    
+
     return report
 ```
 
@@ -509,7 +509,7 @@ async def test_poisoning_detection():
     """
     from spam_detector import TransactionMetadata
     from datetime import timedelta
-    
+
     # From research: 700k USDT loss case
     legitimate = TransactionMetadata(
         tx_hash="0xlegit",
@@ -521,7 +521,7 @@ async def test_poisoning_detection():
         is_new_address=False,
         contract_age_blocks=50
     )
-    
+
     # Poisoning (detected within 30 seconds)
     poison = TransactionMetadata(
         tx_hash="0xpoison",
@@ -533,12 +533,12 @@ async def test_poisoning_detection():
         is_new_address=True,
         contract_age_blocks=1
     )
-    
+
     detector = SpamDetector()
     analysis = detector.analyze_transaction(poison, [legitimate])
-    
+
     assert analysis.is_suspicious, "Should detect poisoning"
     assert analysis.score >= 80, f"Score too low: {analysis.score}"
-    
+
     print(f"✅ Poisoning detection test passed (Score: {analysis.score})")
 ```
