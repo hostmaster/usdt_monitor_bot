@@ -1,6 +1,6 @@
 # tests/test_checker.py
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -123,15 +123,22 @@ async def test_check_address_no_new_tx(
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_etherscan.get_token_transactions.return_value = []
+    # When no transactions found, we try to get latest block to advance progress
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
     mock_db.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
     # Etherscan client is called for each token (USDT, USDC)
     assert mock_etherscan.get_token_transactions.await_count == 2
+    # When no transactions found, we try to get latest block number
+    mock_etherscan.get_latest_block_number.assert_awaited()
     mock_notifier.send_token_notification.assert_not_awaited()
-    # The block should not be updated if it hasn't changed.
-    mock_db.update_last_checked_block.assert_not_awaited()
+    # The block should be updated to latest block when no transactions found
+    # This prevents the bot from getting stuck checking the same block repeatedly
+    mock_db.update_last_checked_block.assert_awaited_once_with(
+        ADDR1.lower(), BLOCK_ADDR1_START + 100
+    )
 
 
 @pytest.mark.parametrize(
@@ -145,7 +152,11 @@ async def test_check_address_no_new_tx(
         ),
         (
             "outgoing_only",
-            [create_mock_tx(BLOCK_ADDR1_START + 1, ADDR1, "0xrecipient", USDT_CONTRACT)],
+            [
+                create_mock_tx(
+                    BLOCK_ADDR1_START + 1, ADDR1, "0xrecipient", USDT_CONTRACT
+                )
+            ],
             1,
             BLOCK_ADDR1_START + 1,
         ),
@@ -153,7 +164,9 @@ async def test_check_address_no_new_tx(
             "mixed_incoming_outgoing",
             [
                 create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT),
-                create_mock_tx(BLOCK_ADDR1_START + 2, ADDR1, "0xrecipient", USDT_CONTRACT),
+                create_mock_tx(
+                    BLOCK_ADDR1_START + 2, ADDR1, "0xrecipient", USDT_CONTRACT
+                ),
             ],
             2,
             BLOCK_ADDR1_START + 2,
@@ -180,12 +193,14 @@ async def test_check_single_address_with_tx(
     await checker.check_all_addresses()
 
     assert mock_notifier.send_token_notification.await_count == expected_notifications
-    mock_db.update_last_checked_block.assert_awaited_once_with(ADDR1.lower(), final_block)
+    mock_db.update_last_checked_block.assert_awaited_once_with(
+        ADDR1.lower(), final_block
+    )
     # Verify the last sent notification is for the last transaction
     if expected_notifications > 0:
         last_tx = transactions[-1]
         mock_notifier.send_token_notification.assert_any_await(
-            USER1, last_tx, "USDT", ADDR1.lower()
+            USER1, last_tx, "USDT", ADDR1.lower(), ANY
         )
 
 
@@ -200,22 +215,35 @@ async def test_check_multiple_addresses(
     tx2 = create_mock_tx(BLOCK_ADDR1_START + 10, "0xsender", ADDR2, USDC_CONTRACT)
 
     mock_db.get_distinct_addresses.return_value = [ADDR1, ADDR2]
-    mock_db.get_last_checked_block.side_effect = [BLOCK_ADDR1_START, BLOCK_ADDR1_START + 9]
+    mock_db.get_last_checked_block.side_effect = [
+        BLOCK_ADDR1_START,
+        BLOCK_ADDR1_START + 9,
+    ]
     mock_db.get_users_for_address.side_effect = [[USER1], [USER2]]
     mock_etherscan.get_token_transactions.side_effect = [
-        [tx1], [],  # ADDR1: USDT tx, no USDC tx
-        [], [tx2],  # ADDR2: no USDT tx, USDC tx
+        [tx1],
+        [],  # ADDR1: USDT tx, no USDC tx
+        [],
+        [tx2],  # ADDR2: no USDT tx, USDC tx
     ]
 
     await checker.check_all_addresses()
 
     assert mock_notifier.send_token_notification.await_count == 2
-    mock_notifier.send_token_notification.assert_any_await(USER1, tx1, "USDT", ADDR1.lower())
-    mock_notifier.send_token_notification.assert_any_await(USER2, tx2, "USDC", ADDR2.lower())
+    mock_notifier.send_token_notification.assert_any_await(
+        USER1, tx1, "USDT", ADDR1.lower(), ANY
+    )
+    mock_notifier.send_token_notification.assert_any_await(
+        USER2, tx2, "USDC", ADDR2.lower(), ANY
+    )
 
     assert mock_db.update_last_checked_block.await_count == 2
-    mock_db.update_last_checked_block.assert_any_await(ADDR1.lower(), int(tx1["blockNumber"]))
-    mock_db.update_last_checked_block.assert_any_await(ADDR2.lower(), int(tx2["blockNumber"]))
+    mock_db.update_last_checked_block.assert_any_await(
+        ADDR1.lower(), int(tx1["blockNumber"])
+    )
+    mock_db.update_last_checked_block.assert_any_await(
+        ADDR2.lower(), int(tx2["blockNumber"])
+    )
 
 
 async def test_check_etherscan_rate_limit_skips_block_update(
@@ -225,7 +253,9 @@ async def test_check_etherscan_rate_limit_skips_block_update(
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     # Simulate rate limit error for all token fetches for the address
-    checker._fetch_transactions_for_address = AsyncMock(side_effect=EtherscanRateLimitError("Rate Limited"))
+    checker._fetch_transactions_for_address = AsyncMock(
+        side_effect=EtherscanRateLimitError("Rate Limited")
+    )
 
     await checker.check_all_addresses()
 
@@ -234,14 +264,21 @@ async def test_check_etherscan_rate_limit_skips_block_update(
 
 
 async def test_transaction_age_filtering(
-    checker: TransactionChecker, mock_db: AsyncMock, mock_etherscan: AsyncMock, mock_notifier: AsyncMock
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
 ):
     """Test that transactions older than `max_transaction_age_days` are ignored."""
     recent_ts = int(NOW_TS - timedelta(days=1).total_seconds())
     old_ts = int(NOW_TS - timedelta(days=8).total_seconds())
 
-    recent_tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, timestamp=recent_ts)
-    old_tx = create_mock_tx(BLOCK_ADDR1_START + 2, "0xsender", ADDR1, USDT_CONTRACT, timestamp=old_ts)
+    recent_tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, timestamp=recent_ts
+    )
+    old_tx = create_mock_tx(
+        BLOCK_ADDR1_START + 2, "0xsender", ADDR1, USDT_CONTRACT, timestamp=old_ts
+    )
 
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
@@ -251,13 +288,21 @@ async def test_transaction_age_filtering(
     await checker.check_all_addresses()
 
     # Only the recent transaction should be processed
-    mock_notifier.send_token_notification.assert_awaited_once_with(USER1, recent_tx, "USDT", ADDR1.lower())
+    mock_notifier.send_token_notification.assert_awaited_once_with(
+        USER1, recent_tx, "USDT", ADDR1.lower(), ANY
+    )
     # The block number should be updated to the highest *seen*, even if filtered
-    mock_db.update_last_checked_block.assert_awaited_once_with(ADDR1.lower(), BLOCK_ADDR1_START + 2)
+    mock_db.update_last_checked_block.assert_awaited_once_with(
+        ADDR1.lower(), BLOCK_ADDR1_START + 2
+    )
 
 
 async def test_transaction_count_limiting(
-    checker: TransactionChecker, mock_db: AsyncMock, mock_etherscan: AsyncMock, mock_notifier: AsyncMock, mock_config: MagicMock
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+    mock_config: MagicMock,
 ):
     """Test that only `max_transactions_per_check` are processed."""
     # Create more transactions than the limit
@@ -275,15 +320,23 @@ async def test_transaction_count_limiting(
     await checker.check_all_addresses()
 
     # Verify that only the configured number of newest transactions were processed
-    assert mock_notifier.send_token_notification.await_count == mock_config.max_transactions_per_check
-    
+    assert (
+        mock_notifier.send_token_notification.await_count
+        == mock_config.max_transactions_per_check
+    )
+
     # The latest block processed should be the newest of all transactions
     latest_block = BLOCK_ADDR1_START + tx_count
-    mock_db.update_last_checked_block.assert_awaited_once_with(ADDR1.lower(), latest_block)
+    mock_db.update_last_checked_block.assert_awaited_once_with(
+        ADDR1.lower(), latest_block
+    )
 
 
 async def test_invalid_timestamp_is_skipped(
-    checker: TransactionChecker, mock_db: AsyncMock, mock_etherscan: AsyncMock, mock_notifier: AsyncMock
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
 ):
     """Test that a transaction with an invalid timestamp is skipped."""
     valid_tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
@@ -298,16 +351,22 @@ async def test_invalid_timestamp_is_skipped(
     await checker.check_all_addresses()
 
     # Only the valid transaction should be processed
-    mock_notifier.send_token_notification.assert_awaited_once_with(USER1, valid_tx, "USDT", ADDR1.lower())
+    mock_notifier.send_token_notification.assert_awaited_once_with(
+        USER1, valid_tx, "USDT", ADDR1.lower(), ANY
+    )
     # Block should be updated to the highest block seen, even if it has invalid data and wasn't processed.
-    mock_db.update_last_checked_block.assert_awaited_once_with(ADDR1.lower(), BLOCK_ADDR1_START + 2)
+    mock_db.update_last_checked_block.assert_awaited_once_with(
+        ADDR1.lower(), BLOCK_ADDR1_START + 2
+    )
 
 
 # --- Unit Tests for Internal Methods ---
 
 
 @pytest.mark.asyncio
-async def test_fetch_transactions_success(checker: TransactionChecker, mock_etherscan: AsyncMock):
+async def test_fetch_transactions_success(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
     """Test `_fetch_transactions_for_address` success case."""
     tx_usdt = create_mock_tx(1, "s", "r", USDT_CONTRACT)
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
@@ -322,7 +381,9 @@ async def test_fetch_transactions_success(checker: TransactionChecker, mock_ethe
 
 
 @pytest.mark.asyncio
-async def test_fetch_transactions_partial_failure(checker: TransactionChecker, mock_etherscan: AsyncMock):
+async def test_fetch_transactions_partial_failure(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
     """Test `_fetch_transactions_for_address` with one token failing."""
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
     mock_etherscan.get_token_transactions.side_effect = [

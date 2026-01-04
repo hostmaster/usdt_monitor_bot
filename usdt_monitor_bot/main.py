@@ -1,14 +1,22 @@
-# main.py
+"""
+Main application entry point.
+
+Initializes and starts the USDT Monitor Bot, including database setup,
+Telegram bot configuration, and transaction checking scheduler.
+"""
+
+# Standard library
 import asyncio
 import logging
 from datetime import datetime
 
+# Third-party
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Import refactored components
+# Local
 from usdt_monitor_bot.checker import TransactionChecker
 from usdt_monitor_bot.config import load_config
 from usdt_monitor_bot.database import DatabaseManager
@@ -18,9 +26,10 @@ from usdt_monitor_bot.notifier import NotificationService
 
 
 async def main() -> None:
-    # 1. Configure Logging
+    # 1. Configure basic logging first (before config load, which also logs)
+    # We'll adjust the level after loading config
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.INFO,  # Start with INFO, will adjust based on config
         format="%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s",
         # Optional: Add file handler
         # handlers=[
@@ -28,15 +37,21 @@ async def main() -> None:
         #     logging.FileHandler("bot.log")
         # ]
     )
-    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
-    logging.getLogger("aiosqlite").setLevel(
-        logging.WARNING
-    )  # Quieten DB logs if needed
-    logging.info("Logging configured.")
 
     # 2. Load Configuration
     config = load_config()
-    logging.info("Configuration loaded.")
+
+    # 3. Adjust logging level based on verbose setting
+    if config.verbose_logging:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("Verbose logging enabled (DEBUG level).")
+    else:
+        logging.getLogger().setLevel(logging.INFO)
+        logging.info("Logging configured (INFO level).")
+
+    # Suppress verbose logs from third-party libraries
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
     # 3. Initialize Database
     db_manager = DatabaseManager(db_path=config.db_path)

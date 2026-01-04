@@ -23,7 +23,6 @@ tasks:
     cmds:
       - echo "{{.CR_PAT}}" | docker login ghcr.io -u hostmaster --password-stdin
       - docker push {{.IMAGE}}:{{.TAG}}
-      - docker push {{.IMAGE}}:stable
 
   all:
     desc: Build and push Docker image

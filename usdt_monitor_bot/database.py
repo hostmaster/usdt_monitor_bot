@@ -1,14 +1,23 @@
-# database.py
+"""
+Database management module.
+
+Handles all interactions with the SQLite database including user management,
+wallet tracking, and transaction history storage.
+"""
+
+# Standard library
 import asyncio
 import functools
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from typing import List, Optional
 
 
 class WalletAddResult(Enum):
+    """Result of wallet addition operation."""
+
     ADDED = auto()
     ALREADY_EXISTS = auto()
     DB_ERROR = auto()
@@ -58,7 +67,7 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Database error: {e} | Query: {query} | Params: {params}")
             if commit:
-                return -1 # Special value for error in commit operation
+                return -1  # Special value for error in commit operation
             return None if fetch_one or fetch_all else False
         # No finally needed, 'with' handles closing
 
@@ -73,8 +82,15 @@ class DatabaseManager:
             return await loop.run_in_executor(None, functools.partial(func, *args))
 
     # --- Initialization ---
-    def _init_db_sync(self):
-        """Synchronous initialization of database tables."""
+    def _init_db_sync(self) -> bool:
+        """
+        Synchronously initialize database tables.
+
+        Creates all required tables if they don't exist, including indexes.
+
+        Returns:
+            True if initialization succeeded, False otherwise
+        """
         logging.info("Initializing database tables...")
         queries = [
             """CREATE TABLE IF NOT EXISTS users (
@@ -92,6 +108,23 @@ class DatabaseManager:
                    last_checked_block INTEGER DEFAULT 0,
                    last_check_time TIMESTAMP
                )""",
+            """CREATE TABLE IF NOT EXISTS transaction_history (
+                   tx_hash TEXT PRIMARY KEY,
+                   monitored_address TEXT NOT NULL,
+                   from_address TEXT NOT NULL,
+                   to_address TEXT NOT NULL,
+                   value REAL NOT NULL,
+                   block_number INTEGER NOT NULL,
+                   timestamp TEXT NOT NULL,
+                   token_symbol TEXT NOT NULL,
+                   risk_score INTEGER,
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address)
+               )""",
+            """CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address
+                   ON transaction_history(monitored_address, block_number DESC)""",
+            """CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp
+                   ON transaction_history(timestamp)""",
         ]
         success = True
         for query in queries:
@@ -146,14 +179,14 @@ class DatabaseManager:
                 (address_lower,),
                 commit=True,
             )
-            if tracked_rowcount == -1: # Error adding to tracked_addresses
+            if tracked_rowcount == -1:  # Error adding to tracked_addresses
                 logging.error(
                     f"DB error while ensuring {address_lower} is in tracked_addresses after adding to wallets table for user {user_id}."
                 )
                 # This is a tricky state. The wallet is added for the user, but tracking might fail.
                 # For now, report as ADDED because the primary user-facing operation succeeded.
                 # Consider a compensating transaction or more robust error handling here if critical.
-                return WalletAddResult.ADDED # Or a new specific error state
+                return WalletAddResult.ADDED  # Or a new specific error state
             return WalletAddResult.ADDED
         elif rowcount == 0:
             # No rows affected means (user_id, address) already exists
@@ -164,13 +197,13 @@ class DatabaseManager:
                 (address_lower,),
                 commit=True,
             )
-            if tracked_rowcount == -1: # Error adding to tracked_addresses
-                 logging.error(
+            if tracked_rowcount == -1:  # Error adding to tracked_addresses
+                logging.error(
                     f"DB error while ensuring {address_lower} is in tracked_addresses for an ALREADY_EXISTS wallet for user {user_id}."
                 )
-                # If this fails, it's not critical for the "already exists" status for this user.
+            # If this fails, it's not critical for the "already exists" status for this user.
             return WalletAddResult.ALREADY_EXISTS
-        else: # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
+        else:  # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
             return WalletAddResult.DB_ERROR
 
     def _list_wallets_sync(self, user_id: int) -> Optional[List[str]]:
@@ -280,4 +313,186 @@ class DatabaseManager:
     async def update_last_checked_block(self, address: str, block_number: int) -> bool:
         return await self._run_sync_db_operation(
             self._update_last_checked_block_sync, address, block_number
+        )
+
+    # --- Transaction History Operations (Sync versions) ---
+    def _store_transaction_sync(
+        self,
+        tx_hash: str,
+        monitored_address: str,
+        from_address: str,
+        to_address: str,
+        value: float,
+        block_number: int,
+        timestamp: str,  # ISO format string
+        token_symbol: str,
+        risk_score: Optional[int] = None,
+    ) -> bool:
+        """
+        Store a transaction in the history table.
+
+        Args:
+            tx_hash: Transaction hash (primary key)
+            monitored_address: The address being monitored
+            from_address: Sender address
+            to_address: Recipient address
+            value: Transaction value in USDT
+            block_number: Block number
+            timestamp: ISO format timestamp string
+            token_symbol: Token symbol (USDT, USDC, etc.)
+            risk_score: Optional risk score from spam detection
+
+        Returns:
+            True if successful, False otherwise
+        """
+        query = """INSERT OR REPLACE INTO transaction_history
+                   (tx_hash, monitored_address, from_address, to_address, value,
+                    block_number, timestamp, token_symbol, risk_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+        rowcount = self._execute_db_query(
+            query,
+            (
+                tx_hash,
+                monitored_address.lower(),
+                from_address.lower(),
+                to_address.lower(),
+                value,
+                block_number,
+                timestamp,
+                token_symbol,
+                risk_score,
+            ),
+            commit=True,
+        )
+        return rowcount > 0
+
+    def _get_recent_transactions_sync(
+        self, monitored_address: str, limit: int = 20
+    ) -> List[dict]:
+        """
+        Get recent transactions for a monitored address, ordered by block number descending.
+
+        Args:
+            monitored_address: The address being monitored
+            limit: Maximum number of transactions to return
+
+        Returns:
+            List of transaction dictionaries with keys matching TransactionMetadata fields
+        """
+        query = """SELECT tx_hash, from_address, to_address, value, block_number,
+                          timestamp, token_symbol, risk_score
+                   FROM transaction_history
+                   WHERE monitored_address = ?
+                   ORDER BY block_number DESC, timestamp DESC
+                   LIMIT ?"""
+        results = self._execute_db_query(
+            query, (monitored_address.lower(), limit), fetch_all=True
+        )
+        if not results:
+            return []
+
+        transactions = []
+        for row in results:
+            transactions.append(
+                {
+                    "tx_hash": row[0],
+                    "from_address": row[1],
+                    "to_address": row[2],
+                    "value": row[3],
+                    "block_number": row[4],
+                    "timestamp": row[5],
+                    "token_symbol": row[6],
+                    "risk_score": row[7],
+                }
+            )
+        return transactions
+
+    def _cleanup_old_transactions_sync(self, days_to_keep: int = 30) -> int:
+        """
+        Remove transactions older than specified days.
+
+        Args:
+            days_to_keep: Number of days of history to keep
+
+        Returns:
+            Number of transactions deleted
+        """
+        # Calculate cutoff timestamp
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
+        cutoff_iso = cutoff.isoformat()
+
+        query = "DELETE FROM transaction_history WHERE timestamp < ?"
+        rowcount = self._execute_db_query(query, (cutoff_iso,), commit=True)
+        return rowcount if rowcount > 0 else 0
+
+    def _is_new_sender_address_sync(
+        self, monitored_address: str, sender_address: str
+    ) -> bool:
+        """
+        Check if a sender address has been seen before for this monitored address.
+
+        Args:
+            monitored_address: The address being monitored
+            sender_address: The sender address to check
+
+        Returns:
+            True if this is a new sender, False if seen before
+        """
+        query = """SELECT 1 FROM transaction_history
+                   WHERE monitored_address = ? AND from_address = ?
+                   LIMIT 1"""
+        result = self._execute_db_query(
+            query,
+            (monitored_address.lower(), sender_address.lower()),
+            fetch_one=True,
+        )
+        return result is None
+
+    # --- Async Public Methods for Transaction History ---
+    async def store_transaction(
+        self,
+        tx_hash: str,
+        monitored_address: str,
+        from_address: str,
+        to_address: str,
+        value: float,
+        block_number: int,
+        timestamp: str,
+        token_symbol: str,
+        risk_score: Optional[int] = None,
+    ) -> bool:
+        """Store a transaction in the history table."""
+        return await self._run_sync_db_operation(
+            self._store_transaction_sync,
+            tx_hash,
+            monitored_address,
+            from_address,
+            to_address,
+            value,
+            block_number,
+            timestamp,
+            token_symbol,
+            risk_score,
+        )
+
+    async def get_recent_transactions(
+        self, monitored_address: str, limit: int = 20
+    ) -> List[dict]:
+        """Get recent transactions for a monitored address."""
+        return await self._run_sync_db_operation(
+            self._get_recent_transactions_sync, monitored_address, limit
+        )
+
+    async def cleanup_old_transactions(self, days_to_keep: int = 30) -> int:
+        """Remove transactions older than specified days."""
+        return await self._run_sync_db_operation(
+            self._cleanup_old_transactions_sync, days_to_keep
+        )
+
+    async def is_new_sender_address(
+        self, monitored_address: str, sender_address: str
+    ) -> bool:
+        """Check if a sender address has been seen before."""
+        return await self._run_sync_db_operation(
+            self._is_new_sender_address_sync, monitored_address, sender_address
         )

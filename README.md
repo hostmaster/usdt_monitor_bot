@@ -1,21 +1,34 @@
 # USDT Monitor Bot
 
-A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) transactions and notifies users when they receive USDT.
+A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) and USDC transactions, providing real-time notifications with advanced spam detection to protect users from address poisoning attacks and dust attacks.
 
 > **AI-Assisted Development**: This project was developed using an AI code assistant through several iterations, with minimal human intervention. The AI assistant helped with code generation, architecture design, testing, and documentation, while human developers provided high-level guidance and reviewed the final implementation.
 
 ## Features
 
-- Monitor multiple Ethereum addresses for incoming and outgoing USDT transactions
-- Real-time notifications when USDT is received or sent
-- Simple command interface via Telegram
-- Persistent storage of user preferences and wallet addresses
-- Dockerized deployment for easy setup
-- Configurable notification settings
-- Support for multiple users and addresses
-- Robust transaction age filtering with boundary case handling
-- Comprehensive test coverage with async support
-- Detailed logging for debugging and monitoring
+### Core Functionality
+- **Multi-Address Monitoring** - Monitor multiple Ethereum addresses for USDT and USDC transactions
+- **Real-Time Notifications** - Instant Telegram notifications when transactions are detected
+- **Multi-User Support** - Multiple users can track the same or different addresses
+- **Persistent Storage** - SQLite database for user preferences and transaction history
+
+### Security & Protection
+- **🛡️ Spam Detection** - Advanced protection against address poisoning and dust attacks
+  - 7 distinct detection filters
+  - Real-time risk scoring (0-100)
+  - Historical transaction pattern analysis
+  - Enhanced notifications with risk warnings
+  - [View Documentation →](./docs/features/spam-detection/)
+
+### Developer Experience
+- **Simple Command Interface** - Easy-to-use Telegram commands
+- **Configurable Settings** - Extensive environment variable configuration
+- **Verbose Logging** - Optional debug logging via `VERBOSE` environment variable
+- **Dockerized Deployment** - Easy containerized deployment
+- **Comprehensive Testing** - Full test coverage with async support
+- **Automatic Database Migration** - Seamless schema updates
+
+📚 **[View All Features Documentation →](./docs/features/)**
 
 ## Commands
 
@@ -27,7 +40,12 @@ A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) trans
 
 ## How It Works
 
-The bot periodically checks the Etherscan API for new USDT transactions to the monitored addresses. When a new incoming transaction is detected, it sends a notification to all users tracking that address.
+The bot periodically checks the Etherscan API for new USDT/USDC transactions to the monitored addresses. Each transaction is analyzed by the spam detection system to identify suspicious patterns. When a new transaction is detected:
+
+1. **Transaction Analysis** - The spam detection engine evaluates the transaction for risk factors
+2. **Risk Scoring** - A risk score (0-100) is calculated based on multiple detection filters
+3. **Notification** - Users receive notifications with transaction details and risk warnings (if suspicious)
+4. **History Tracking** - Transactions are stored for pattern analysis and future detection improvements
 
 ## Project Structure
 
@@ -40,8 +58,17 @@ usdt_monitor_bot/
 ├── handlers.py      # Telegram bot command handlers
 ├── notifier.py      # Notification system
 ├── checker.py       # Transaction checking logic
+├── spam_detector.py # Spam detection and risk analysis
+├── token_config.py  # Token configuration and registry
 └── __init__.py
 ```
+
+📚 **Documentation:**
+- `docs/` - Complete documentation index
+- `docs/features/` - Feature documentation
+- `docs/guides/` - User guides and deployment
+- `docs/research/` - Research summaries and reviews
+- `docs/examples/` - Code examples and usage scenarios
 
 ## Requirements
 
@@ -59,8 +86,20 @@ usdt_monitor_bot/
 
 ## Environment Variables
 
-- `BOT_TOKEN` - Your Telegram bot token
-- `ETHERSCAN_API_KEY` - Your Etherscan API key
+### Required
+
+- `TELEGRAM_BOT_TOKEN` - Your Telegram bot token (from [@BotFather](https://t.me/BotFather))
+- `ETHERSCAN_API_KEY` - Your Etherscan API key (from [Etherscan](https://etherscan.io/apis))
+
+### Optional
+
+- `VERBOSE` - Enable verbose/debug logging (`true`, `1`, `yes`, or `on`). Default: `false` (INFO level)
+- `DB_PATH` - Custom database file path. Default: `data/usdt_monitor.db`
+- `CHECK_INTERVAL_SECONDS` - Transaction check interval in seconds. Default: `60`
+- `MAX_TRANSACTION_AGE_DAYS` - Maximum age of transactions to report. Default: `7`
+- `MAX_TRANSACTIONS_PER_CHECK` - Maximum transactions to report per check cycle. Default: `10`
+- `ETHERSCAN_REQUEST_DELAY` - Delay between Etherscan API requests (seconds). Default: `0.2`
+- `ETHERSCAN_BASE_URL` - Custom Etherscan API base URL. Default: `https://api.etherscan.io/v2/api`
 
 ## Local Development
 
@@ -80,7 +119,7 @@ usdt_monitor_bot/
 
 ## Docker Deployment
 
-See [DEPLOY.md](DEPLOY.md) for detailed deployment instructions using Docker.
+See [Deployment Guide](./docs/guides/DEPLOY.md) for detailed deployment instructions using Docker.
 
 ## License
 

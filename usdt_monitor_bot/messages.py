@@ -17,13 +17,13 @@ def welcome_message(full_name: str, is_returning: bool) -> str:
 # --- /help Command ---
 HELP_TEXT = (
     f"{hbold('Available Commands:')}\n"
-    f"/start - Start interaction\n"
-    f"/help - Show this help message\n"
+    "/start - Start interaction\n"
+    "/help - Show this help message\n"
     f"/add {hcode('<eth_address>')} - Monitor address for incoming USDT\n"
-    f"/list - List your monitored addresses\n"
+    "/list - List your monitored addresses\n"
     f"/remove {hcode('<eth_address>')} - Stop monitoring address\n\n"
     f"ℹ️ I check wallets every few minutes for new {hbold('incoming USDT')} "
-    f"transfers and notify you if found."
+    "transfers and notify you if found."
 )
 
 # --- /add Command ---
