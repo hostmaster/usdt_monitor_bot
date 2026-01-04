@@ -5,14 +5,12 @@ from decimal import Decimal
 import pytest
 
 from usdt_monitor_bot.spam_detector import (
-    AddressSimilarity,
     RiskAnalysis,
     RiskFlag,
     SpamDetector,
     TransactionMetadata,
     format_risk_report,
 )
-
 
 # --- Test Fixtures ---
 
@@ -78,9 +76,13 @@ class TestAddressSimilarity:
         assert result.risk_score > 0
         assert result.matching_chars > 0
 
-    def test_similar_addresses_prefix_suffix(self, detector, legitimate_address, similar_address):
+    def test_similar_addresses_prefix_suffix(
+        self, detector, legitimate_address, similar_address
+    ):
         """Addresses with similar prefix and suffix should be flagged."""
-        result = detector.calculate_address_similarity(legitimate_address, similar_address)
+        result = detector.calculate_address_similarity(
+            legitimate_address, similar_address
+        )
 
         assert result.prefix_match >= 3
         assert result.suffix_match >= 4
@@ -260,9 +262,14 @@ class TestTransactionAnalysis:
         # Should detect similarity if addresses are actually similar
         # Note: This test depends on the actual similarity of the addresses
         # If addresses aren't similar enough, this test will fail
-        similarity = detector.calculate_address_similarity(legitimate_address, similar_address)
+        similarity = detector.calculate_address_similarity(
+            legitimate_address, similar_address
+        )
         if similarity.is_similar:
-            assert RiskFlag.SIMILAR_ADDRESS in analysis.flags or RiskFlag.LOOKALIKE_PREVIOUS_SENDER in analysis.flags
+            assert (
+                RiskFlag.SIMILAR_ADDRESS in analysis.flags
+                or RiskFlag.LOOKALIKE_PREVIOUS_SENDER in analysis.flags
+            )
         assert analysis.score >= detector.config["dust_risk_weight"]
 
     def test_new_address_detection(self, detector, base_timestamp):
@@ -357,7 +364,9 @@ class TestTransactionAnalysis:
         analysis = detector.analyze_transaction(current_tx, [tx1])
 
         # Should detect lookalike if addresses are actually similar
-        similarity = detector.calculate_address_similarity(legitimate_address, similar_address)
+        similarity = detector.calculate_address_similarity(
+            legitimate_address, similar_address
+        )
         if similarity.is_similar:
             assert RiskFlag.LOOKALIKE_PREVIOUS_SENDER in analysis.flags
         # Should still detect dust amount
@@ -396,10 +405,14 @@ class TestTransactionAnalysis:
             RiskFlag.SIMILAR_ADDRESS,
             RiskFlag.LOOKALIKE_PREVIOUS_SENDER,
         ]
-        similarity_flag_count = sum(1 for flag in analysis.flags if flag in similarity_flags)
+        similarity_flag_count = sum(
+            1 for flag in analysis.flags if flag in similarity_flags
+        )
 
         # Check if addresses are actually similar
-        similarity = detector.calculate_address_similarity(legitimate_address, similar_address)
+        similarity = detector.calculate_address_similarity(
+            legitimate_address, similar_address
+        )
         if similarity.is_similar:
             # Should have at least one similarity flag
             # Note: We might get both SIMILAR_ADDRESS (from timing window check)
@@ -415,7 +428,9 @@ class TestTransactionAnalysis:
                 + detector.config["timing_weight"]
             )
             # Allow some tolerance for other flags that might be present
-            assert analysis.score <= max_expected + 50  # Allow room for other risk factors
+            assert (
+                analysis.score <= max_expected + 50
+            )  # Allow room for other risk factors
         else:
             # If addresses aren't similar, no similarity flags expected
             assert similarity_flag_count == 0
@@ -480,7 +495,9 @@ class TestTransactionAnalysis:
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0.75"),  # Above default threshold ($1) but below custom ($0.5)
+            value=Decimal(
+                "0.75"
+            ),  # Above default threshold ($1) but below custom ($0.5)
             block_number=1000,
             timestamp=base_timestamp,
             contract_age_blocks=100,  # Not brand new
@@ -788,4 +805,3 @@ class TestEdgeCases:
 
         # Recommendations should differ
         assert recommendation != low_recommendation
-
