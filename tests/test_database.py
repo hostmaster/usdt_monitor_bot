@@ -210,3 +210,226 @@ async def test_add_wallet_db_error_on_tracked_addresses_insert(
     assert "DB error while ensuring" in caplog.text
     assert address.lower() in caplog.text
     assert "is in tracked_addresses" in caplog.text
+
+
+async def test_store_and_retrieve_transaction(memory_db_manager: DatabaseManager):
+    """Test storing and retrieving transactions from history."""
+    monitored_addr = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    await memory_db_manager.add_user(1, "user1", "U", "1")
+    await memory_db_manager.add_wallet(1, monitored_addr)
+
+    # Store a transaction
+    stored = await memory_db_manager.store_transaction(
+        tx_hash="0x123",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=100.50,
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+        risk_score=75,
+    )
+    assert stored is True
+
+    # Retrieve recent transactions
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=10)
+    assert len(recent) == 1
+    assert recent[0]["tx_hash"] == "0x123"
+    assert recent[0]["value"] == 100.50
+    assert recent[0]["risk_score"] == 75
+    assert recent[0]["token_symbol"] == "USDT"
+
+
+async def test_get_recent_transactions_limit(memory_db_manager: DatabaseManager):
+    """Test that get_recent_transactions respects the limit."""
+    monitored_addr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    await memory_db_manager.add_user(2, "user2", "U", "2")
+    await memory_db_manager.add_wallet(2, monitored_addr)
+
+    # Store multiple transactions
+    for i in range(15):
+        await memory_db_manager.store_transaction(
+            tx_hash=f"0x{i:04x}",
+            monitored_address=monitored_addr,
+            from_address="0x1111111111111111111111111111111111111111",
+            to_address="0x2222222222222222222222222222222222222222",
+            value=float(i),
+            block_number=1000 + i,
+            timestamp=f"2025-01-27T12:00:{i:02d}+00:00",
+            token_symbol="USDT",
+        )
+
+    # Retrieve with limit
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=10)
+    assert len(recent) == 10
+    # Should be ordered by block number descending
+    assert recent[0]["block_number"] > recent[-1]["block_number"]
+
+
+async def test_is_new_sender_address(memory_db_manager: DatabaseManager):
+    """Test checking if a sender address is new."""
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    sender1 = "0x1111111111111111111111111111111111111111"
+    sender2 = "0x2222222222222222222222222222222222222222"
+
+    await memory_db_manager.add_user(3, "user3", "U", "3")
+    await memory_db_manager.add_wallet(3, monitored_addr)
+
+    # Initially, both senders should be new
+    assert (
+        await memory_db_manager.is_new_sender_address(monitored_addr, sender1) is True
+    )
+    assert (
+        await memory_db_manager.is_new_sender_address(monitored_addr, sender2) is True
+    )
+
+    # Store a transaction from sender1
+    await memory_db_manager.store_transaction(
+        tx_hash="0x111",
+        monitored_address=monitored_addr,
+        from_address=sender1,
+        to_address=monitored_addr,
+        value=100.0,
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+    )
+
+    # Now sender1 should not be new, but sender2 should still be new
+    assert (
+        await memory_db_manager.is_new_sender_address(monitored_addr, sender1) is False
+    )
+    assert (
+        await memory_db_manager.is_new_sender_address(monitored_addr, sender2) is True
+    )
+
+
+async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
+    """Test cleanup of old transactions."""
+    monitored_addr = "0xdddddddddddddddddddddddddddddddddddddddd"
+    await memory_db_manager.add_user(4, "user4", "U", "4")
+    await memory_db_manager.add_wallet(4, monitored_addr)
+
+    from datetime import datetime, timedelta, timezone
+
+    # Store old transaction (35 days ago)
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
+    await memory_db_manager.store_transaction(
+        tx_hash="0xold",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=100.0,
+        block_number=1000,
+        timestamp=old_timestamp,
+        token_symbol="USDT",
+    )
+
+    # Store recent transaction
+    recent_timestamp = datetime.now(timezone.utc).isoformat()
+    await memory_db_manager.store_transaction(
+        tx_hash="0xrecent",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=200.0,
+        block_number=2000,
+        timestamp=recent_timestamp,
+        token_symbol="USDT",
+    )
+
+    # Verify both exist
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=10)
+    assert len(recent) == 2
+
+    # Cleanup transactions older than 30 days
+    deleted = await memory_db_manager.cleanup_old_transactions(days_to_keep=30)
+    assert deleted == 1
+
+    # Verify only recent transaction remains
+    recent_after = await memory_db_manager.get_recent_transactions(
+        monitored_addr, limit=10
+    )
+    assert len(recent_after) == 1
+    assert recent_after[0]["tx_hash"] == "0xrecent"
+
+
+async def test_database_migration_existing_db(memory_db_manager: DatabaseManager):
+    """Test that database migration works on existing databases."""
+    # Simulate an existing database by creating the old tables manually
+    # (In real scenario, these would already exist)
+    monitored_addr = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    await memory_db_manager.add_user(5, "user5", "U", "5")
+    await memory_db_manager.add_wallet(5, monitored_addr)
+
+    # Verify old tables exist
+    result = await memory_db_manager._run_sync_db_operation(
+        lambda: memory_db_manager._execute_db_query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+            fetch_one=True,
+        )
+    )
+    assert result is not None
+
+    # Re-initialize database (simulating migration on existing DB)
+    # This should add the new transaction_history table without affecting existing data
+    migration_success = await memory_db_manager.init_db()
+    assert migration_success is True
+
+    # Verify new table was created
+    result = await memory_db_manager._run_sync_db_operation(
+        lambda: memory_db_manager._execute_db_query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transaction_history'",
+            fetch_one=True,
+        )
+    )
+    assert result is not None
+    assert result[0] == "transaction_history"
+
+    # Verify indexes were created
+    indexes = await memory_db_manager._run_sync_db_operation(
+        lambda: memory_db_manager._execute_db_query(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_tx_history%'",
+            fetch_all=True,
+        )
+    )
+    assert len(indexes) == 2
+
+    # Verify existing data is still intact
+    wallets = await memory_db_manager.list_wallets(5)
+    assert monitored_addr.lower() in wallets
+
+    # Verify we can use the new table
+    stored = await memory_db_manager.store_transaction(
+        tx_hash="0xmigration_test",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=50.0,
+        block_number=5000,
+        timestamp="2025-01-27T15:00:00+00:00",
+        token_symbol="USDT",
+    )
+    assert stored is True
+
+    # Verify we can retrieve from new table
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=1)
+    assert len(recent) == 1
+    assert recent[0]["tx_hash"] == "0xmigration_test"
+
+
+async def test_init_db_idempotent(memory_db_manager: DatabaseManager):
+    """Test that init_db can be called multiple times safely (idempotent)."""
+    # First initialization
+    result1 = await memory_db_manager.init_db()
+    assert result1 is True
+
+    # Second initialization (should not fail or cause issues)
+    result2 = await memory_db_manager.init_db()
+    assert result2 is True
+
+    # Verify tables still exist and are usable
+    await memory_db_manager.add_user(6, "user6", "U", "6")
+    user_exists = await memory_db_manager.check_user_exists(6)
+    assert user_exists is True

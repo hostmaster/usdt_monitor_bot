@@ -1,11 +1,20 @@
-# config.py
+"""
+Configuration module.
+
+Handles loading and managing bot configuration from environment variables
+and provides default values.
+"""
+
+# Standard library
 import logging
 import os
 import sys
 from typing import Optional
 
+# Third-party
 from dotenv import load_dotenv
 
+# Local
 from usdt_monitor_bot.token_config import TokenConfig, TokenRegistry
 
 # Define a data directory inside the container's working directory
@@ -33,6 +42,7 @@ class BotConfig:
         check_interval_seconds: int = 60,
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
+        verbose_logging: bool = False,  # Enable DEBUG level logging
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -57,6 +67,9 @@ class BotConfig:
         # Transaction window settings
         self.max_transaction_age_days = max_transaction_age_days
         self.max_transactions_per_check = max_transactions_per_check
+
+        # Logging settings
+        self.verbose_logging = verbose_logging
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -133,62 +146,98 @@ def load_config() -> BotConfig:
     etherscan_base_url_env = os.getenv("ETHERSCAN_BASE_URL")
     if etherscan_base_url_env:
         etherscan_base_url = etherscan_base_url_env
-        logging.info(f"ETHERSCAN_BASE_URL: Loaded from environment ('{etherscan_base_url}').")
+        logging.info(
+            f"ETHERSCAN_BASE_URL: Loaded from environment ('{etherscan_base_url}')."
+        )
     else:
         etherscan_base_url = default_etherscan_base_url
-        logging.info(f"ETHERSCAN_BASE_URL: Using default value ('{etherscan_base_url}').")
+        logging.info(
+            f"ETHERSCAN_BASE_URL: Using default value ('{etherscan_base_url}')."
+        )
 
     default_etherscan_request_delay = 0.2
     etherscan_request_delay_env = os.getenv("ETHERSCAN_REQUEST_DELAY")
     if etherscan_request_delay_env:
         try:
             etherscan_request_delay = float(etherscan_request_delay_env)
-            logging.info(f"ETHERSCAN_REQUEST_DELAY: Loaded from environment (value: {etherscan_request_delay}).")
+            logging.info(
+                f"ETHERSCAN_REQUEST_DELAY: Loaded from environment (value: {etherscan_request_delay})."
+            )
         except ValueError:
             etherscan_request_delay = default_etherscan_request_delay
-            logging.warning(f"ETHERSCAN_REQUEST_DELAY: Invalid value '{etherscan_request_delay_env}' from environment. Using default value ({etherscan_request_delay}).")
+            logging.warning(
+                f"ETHERSCAN_REQUEST_DELAY: Invalid value '{etherscan_request_delay_env}' from environment. Using default value ({etherscan_request_delay})."
+            )
     else:
         etherscan_request_delay = default_etherscan_request_delay
-        logging.info(f"ETHERSCAN_REQUEST_DELAY: Using default value ({etherscan_request_delay}).")
+        logging.info(
+            f"ETHERSCAN_REQUEST_DELAY: Using default value ({etherscan_request_delay})."
+        )
 
     default_check_interval_seconds = 60
     check_interval_seconds_env = os.getenv("CHECK_INTERVAL_SECONDS")
     if check_interval_seconds_env:
         try:
             check_interval_seconds = int(check_interval_seconds_env)
-            logging.info(f"CHECK_INTERVAL_SECONDS: Loaded from environment (value: {check_interval_seconds}).")
+            logging.info(
+                f"CHECK_INTERVAL_SECONDS: Loaded from environment (value: {check_interval_seconds})."
+            )
         except ValueError:
             check_interval_seconds = default_check_interval_seconds
-            logging.warning(f"CHECK_INTERVAL_SECONDS: Invalid value '{check_interval_seconds_env}' from environment. Using default value ({check_interval_seconds}).")
+            logging.warning(
+                f"CHECK_INTERVAL_SECONDS: Invalid value '{check_interval_seconds_env}' from environment. Using default value ({check_interval_seconds})."
+            )
     else:
         check_interval_seconds = default_check_interval_seconds
-        logging.info(f"CHECK_INTERVAL_SECONDS: Using default value ({check_interval_seconds}).")
+        logging.info(
+            f"CHECK_INTERVAL_SECONDS: Using default value ({check_interval_seconds})."
+        )
 
     default_max_transaction_age_days = 7
     max_transaction_age_days_env = os.getenv("MAX_TRANSACTION_AGE_DAYS")
     if max_transaction_age_days_env:
         try:
             max_transaction_age_days = int(max_transaction_age_days_env)
-            logging.info(f"MAX_TRANSACTION_AGE_DAYS: Loaded from environment (value: {max_transaction_age_days}).")
+            logging.info(
+                f"MAX_TRANSACTION_AGE_DAYS: Loaded from environment (value: {max_transaction_age_days})."
+            )
         except ValueError:
             max_transaction_age_days = default_max_transaction_age_days
-            logging.warning(f"MAX_TRANSACTION_AGE_DAYS: Invalid value '{max_transaction_age_days_env}' from environment. Using default value ({max_transaction_age_days}).")
+            logging.warning(
+                f"MAX_TRANSACTION_AGE_DAYS: Invalid value '{max_transaction_age_days_env}' from environment. Using default value ({max_transaction_age_days})."
+            )
     else:
         max_transaction_age_days = default_max_transaction_age_days
-        logging.info(f"MAX_TRANSACTION_AGE_DAYS: Using default value ({max_transaction_age_days}).")
+        logging.info(
+            f"MAX_TRANSACTION_AGE_DAYS: Using default value ({max_transaction_age_days})."
+        )
 
     default_max_transactions_per_check = 10
     max_transactions_per_check_env = os.getenv("MAX_TRANSACTIONS_PER_CHECK")
     if max_transactions_per_check_env:
         try:
             max_transactions_per_check = int(max_transactions_per_check_env)
-            logging.info(f"MAX_TRANSACTIONS_PER_CHECK: Loaded from environment (value: {max_transactions_per_check}).")
+            logging.info(
+                f"MAX_TRANSACTIONS_PER_CHECK: Loaded from environment (value: {max_transactions_per_check})."
+            )
         except ValueError:
             max_transactions_per_check = default_max_transactions_per_check
-            logging.warning(f"MAX_TRANSACTIONS_PER_CHECK: Invalid value '{max_transactions_per_check_env}' from environment. Using default value ({max_transactions_per_check}).")
+            logging.warning(
+                f"MAX_TRANSACTIONS_PER_CHECK: Invalid value '{max_transactions_per_check_env}' from environment. Using default value ({max_transactions_per_check})."
+            )
     else:
         max_transactions_per_check = default_max_transactions_per_check
-        logging.info(f"MAX_TRANSACTIONS_PER_CHECK: Using default value ({max_transactions_per_check}).")
+    logging.info(
+        f"MAX_TRANSACTIONS_PER_CHECK: Using default value ({max_transactions_per_check})."
+    )
+
+    # Verbose logging option (global VERBOSE flag)
+    verbose_env = os.getenv("VERBOSE", "").lower()
+    verbose_logging = verbose_env in ("true", "1", "yes", "on")
+    if verbose_logging:
+        logging.info("VERBOSE: Enabled (DEBUG level logging).")
+    else:
+        logging.debug("VERBOSE: Disabled (INFO level logging).")
 
     logging.info("--- Token Configuration Overrides ---")
     # Create and return config instance
@@ -201,6 +250,7 @@ def load_config() -> BotConfig:
         check_interval_seconds=check_interval_seconds,
         max_transaction_age_days=max_transaction_age_days,
         max_transactions_per_check=max_transactions_per_check,
+        verbose_logging=verbose_logging,
     )
 
     # Override token configurations if specified in environment
@@ -214,7 +264,9 @@ def load_config() -> BotConfig:
     if usdt_contract_address_env:
         final_usdt_contract = usdt_contract_address_env
         source_usdt_contract = "environment"
-    logging.info(f"USDT_CONTRACT_ADDRESS: Using {source_usdt_contract} value ('{final_usdt_contract}').")
+    logging.info(
+        f"USDT_CONTRACT_ADDRESS: Using {source_usdt_contract} value ('{final_usdt_contract}')."
+    )
 
     final_usdt_decimals = default_usdt_decimals
     source_usdt_decimals = "default"
@@ -223,10 +275,16 @@ def load_config() -> BotConfig:
             final_usdt_decimals = int(usdt_decimals_env)
             source_usdt_decimals = "environment"
         except ValueError:
-            logging.warning(f"USDT_DECIMALS: Invalid value '{usdt_decimals_env}' from environment. Using default value ({final_usdt_decimals}).")
-    logging.info(f"USDT_DECIMALS: Using {source_usdt_decimals} value ({final_usdt_decimals}).")
+            logging.warning(
+                f"USDT_DECIMALS: Invalid value '{usdt_decimals_env}' from environment. Using default value ({final_usdt_decimals})."
+            )
+    logging.info(
+        f"USDT_DECIMALS: Using {source_usdt_decimals} value ({final_usdt_decimals})."
+    )
 
-    if usdt_contract_address_env or usdt_decimals_env: # Only re-register if an override was attempted
+    if (
+        usdt_contract_address_env or usdt_decimals_env
+    ):  # Only re-register if an override was attempted
         usdt_config = TokenConfig(
             name="Tether USD",
             contract_address=final_usdt_contract,
@@ -235,7 +293,7 @@ def load_config() -> BotConfig:
             display_name="USDT",
             explorer_url=f"https://etherscan.io/token/{final_usdt_contract}",
         )
-        config.token_registry.register_token(usdt_config) # Overwrites the default one
+        config.token_registry.register_token(usdt_config)  # Overwrites the default one
 
     usdc_contract_address_env = os.getenv("USDC_CONTRACT_ADDRESS")
     usdc_decimals_env = os.getenv("USDC_DECIMALS")
@@ -247,7 +305,9 @@ def load_config() -> BotConfig:
     if usdc_contract_address_env:
         final_usdc_contract = usdc_contract_address_env
         source_usdc_contract = "environment"
-    logging.info(f"USDC_CONTRACT_ADDRESS: Using {source_usdc_contract} value ('{final_usdc_contract}').")
+    logging.info(
+        f"USDC_CONTRACT_ADDRESS: Using {source_usdc_contract} value ('{final_usdc_contract}')."
+    )
 
     final_usdc_decimals = default_usdc_decimals
     source_usdc_decimals = "default"
@@ -256,10 +316,16 @@ def load_config() -> BotConfig:
             final_usdc_decimals = int(usdc_decimals_env)
             source_usdc_decimals = "environment"
         except ValueError:
-            logging.warning(f"USDC_DECIMALS: Invalid value '{usdc_decimals_env}' from environment. Using default value ({final_usdc_decimals}).")
-    logging.info(f"USDC_DECIMALS: Using {source_usdc_decimals} value ({final_usdc_decimals}).")
+            logging.warning(
+                f"USDC_DECIMALS: Invalid value '{usdc_decimals_env}' from environment. Using default value ({final_usdc_decimals})."
+            )
+    logging.info(
+        f"USDC_DECIMALS: Using {source_usdc_decimals} value ({final_usdc_decimals})."
+    )
 
-    if usdc_contract_address_env or usdc_decimals_env: # Only re-register if an override was attempted
+    if (
+        usdc_contract_address_env or usdc_decimals_env
+    ):  # Only re-register if an override was attempted
         usdc_config = TokenConfig(
             name="USD Coin",
             contract_address=final_usdc_contract,
@@ -268,7 +334,7 @@ def load_config() -> BotConfig:
             display_name="USDC",
             explorer_url=f"https://etherscan.io/token/{final_usdc_contract}",
         )
-        config.token_registry.register_token(usdc_config) # Overwrites the default one
+        config.token_registry.register_token(usdc_config)  # Overwrites the default one
 
     logging.info("--- Configuration Loading Complete ---")
     return config
