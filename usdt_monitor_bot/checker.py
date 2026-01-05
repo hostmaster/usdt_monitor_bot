@@ -9,6 +9,7 @@ and performs spam detection analysis.
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
@@ -30,6 +31,17 @@ from usdt_monitor_bot.spam_detector import (
     SpamDetector,
     TransactionMetadata,
 )
+
+
+@dataclass
+class BlockDeterminationResult:
+    """Result of determining the next block number to check."""
+
+    final_block_number: int
+    """The final block number to use for the next check."""
+
+    resetting_to_latest: bool
+    """Whether the block was reset/capped to sync with the blockchain."""
 
 
 class TransactionChecker:
@@ -508,7 +520,7 @@ class TransactionChecker:
         new_last_block: int,
         raw_transactions: List[dict],
         address_lower: str,
-    ) -> tuple[int, bool]:
+    ) -> BlockDeterminationResult:
         """
         Determine the next block number to check, verifying against actual blockchain.
 
@@ -522,7 +534,7 @@ class TransactionChecker:
             address_lower: The monitored address (lowercase) for logging
 
         Returns:
-            Tuple of (final_block_number, resetting_to_latest_flag)
+            BlockDeterminationResult with final_block_number and resetting_to_latest flag
         """
         resetting_to_latest = False
         query_start_block = start_block + 1
@@ -539,7 +551,10 @@ class TransactionChecker:
                     f"Could not get latest block number for {address_lower}. "
                     f"Advancing from {start_block} to {new_last_block} (query_start_block) to prevent getting stuck."
                 )
-            return (new_last_block, resetting_to_latest)
+            return BlockDeterminationResult(
+                final_block_number=new_last_block,
+                resetting_to_latest=resetting_to_latest,
+            )
 
         # Main logic: latest_block is available, verify against it
         # Always ensure we never advance beyond the actual blockchain
@@ -576,7 +591,10 @@ class TransactionChecker:
                 )
             new_last_block = latest_block
 
-        return (new_last_block, resetting_to_latest)
+        return BlockDeterminationResult(
+            final_block_number=new_last_block,
+            resetting_to_latest=resetting_to_latest,
+        )
 
     async def check_all_addresses(self) -> None:
         """
@@ -633,9 +651,11 @@ class TransactionChecker:
                 total_transactions_processed += processed_count
 
                 # Determine the next block to check, verifying against actual blockchain
-                new_last_block, resetting_to_latest = await self._determine_next_block(
+                block_result = await self._determine_next_block(
                     start_block, new_last_block, raw_transactions, address_lower
                 )
+                new_last_block = block_result.final_block_number
+                resetting_to_latest = block_result.resetting_to_latest
 
                 # Always update block number to prevent getting stuck
                 # Allow update even if new_last_block < start_block when we're resetting to sync with blockchain
