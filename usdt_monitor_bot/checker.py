@@ -32,6 +32,10 @@ from usdt_monitor_bot.spam_detector import (
     TransactionMetadata,
 )
 
+# Etherscan API error message constants
+NO_TRANSACTIONS_FOUND = "No transactions found"
+NOTOK_ERROR = "NOTOK"
+
 
 @dataclass
 class BlockDeterminationResult:
@@ -80,10 +84,10 @@ class TransactionChecker:
         elif isinstance(error, EtherscanError):
             error_msg = str(error)
             # Skip logging for "No transactions found" - expected for inactive addresses
-            if "No transactions found" in error_msg:
+            if NO_TRANSACTIONS_FOUND in error_msg:
                 return
 
-            if "NOTOK" in error_msg:
+            if NOTOK_ERROR in error_msg:
                 logging.warning(
                     f"Error checking {token_symbol} transactions for {address_lower}: {error_msg}. "
                     "This may indicate a query timeout or API issue. The address will be retried in the next cycle."
