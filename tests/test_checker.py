@@ -189,6 +189,8 @@ async def test_check_single_address_with_tx(
     mock_db.get_users_for_address.return_value = [USER1]
     # Assume all test transactions are for USDT
     mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    # Mock latest block to be >= final_block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = final_block + 100
 
     await checker.check_all_addresses()
 
@@ -226,6 +228,8 @@ async def test_check_multiple_addresses(
         [],
         [tx2],  # ADDR2: no USDT tx, USDC tx
     ]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -284,6 +288,8 @@ async def test_transaction_age_filtering(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [[recent_tx, old_tx], []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -316,6 +322,9 @@ async def test_transaction_count_limiting(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    latest_block = BLOCK_ADDR1_START + tx_count
+    mock_etherscan.get_latest_block_number.return_value = latest_block + 100
 
     await checker.check_all_addresses()
 
@@ -326,7 +335,6 @@ async def test_transaction_count_limiting(
     )
 
     # The latest block processed should be the newest of all transactions
-    latest_block = BLOCK_ADDR1_START + tx_count
     mock_db.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), latest_block
     )
@@ -347,6 +355,8 @@ async def test_invalid_timestamp_is_skipped(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [[valid_tx, invalid_tx], []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
