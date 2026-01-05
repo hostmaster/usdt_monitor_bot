@@ -651,19 +651,20 @@ class TransactionChecker:
 
         cycle_duration = time.time() - cycle_start_time
 
-        # Log summary at INFO level (simple)
+        # Log summary at INFO level - include all relevant information
+        summary_parts = []
         if total_transactions_processed > 0:
-            logging.info(
-                f"Transaction check cycle complete: processed {total_transactions_processed} new transaction(s) in {cycle_duration:.2f}s"
+            summary_parts.append(
+                f"processed {total_transactions_processed} new transaction(s)"
             )
-        elif errors_count > 0 or warnings_count > 0:
-            status_parts = []
-            if errors_count > 0:
-                status_parts.append(f"{errors_count} error(s)")
-            if warnings_count > 0:
-                status_parts.append(f"{warnings_count} warning(s)")
+        if errors_count > 0:
+            summary_parts.append(f"{errors_count} error(s)")
+        if warnings_count > 0:
+            summary_parts.append(f"{warnings_count} warning(s)")
+
+        if summary_parts:
             logging.info(
-                f"Transaction check cycle complete: {', '.join(status_parts)} in {cycle_duration:.2f}s"
+                f"Transaction check cycle complete: {', '.join(summary_parts)} in {cycle_duration:.2f}s"
             )
         else:
             logging.info(f"Transaction check cycle complete in {cycle_duration:.2f}s")
