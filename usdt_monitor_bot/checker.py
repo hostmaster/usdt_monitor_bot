@@ -475,18 +475,12 @@ class TransactionChecker:
             logging.warning(
                 f"Token config not found for {tx_token_symbol}, skipping spam detection"
             )
-            # Send notification without spam detection
-            for user_id in user_ids:
-                await self._notifier.send_token_notification(
-                    user_id, tx, tx_token_symbol, address_lower
-                )
-            return len(user_ids)
 
-        # Process with spam detection
+        # Process with spam detection (only if token config is available)
         risk_analysis: Optional[RiskAnalysis] = None
         tx_metadata: Optional[TransactionMetadata] = None
 
-        if self._spam_detection_enabled:
+        if token_config and self._spam_detection_enabled:
             tx_metadata = self._convert_to_transaction_metadata(
                 tx, token_config.decimals
             )
