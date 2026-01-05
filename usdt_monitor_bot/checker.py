@@ -544,16 +544,17 @@ class TransactionChecker:
 
         # Guard clause: handle case where we can't get latest block
         if latest_block is None:
+            final_block = new_last_block
             # If we can't get latest block, only advance if no transactions found
-            if len(raw_transactions) == 0 and new_last_block == start_block:
-                new_last_block = query_start_block
+            if not raw_transactions and new_last_block == start_block:
+                final_block = query_start_block
                 logging.warning(
                     f"Could not get latest block number for {address_lower}. "
-                    f"Advancing from {start_block} to {new_last_block} (query_start_block) to prevent getting stuck."
+                    f"Advancing from {start_block} to {final_block} (query_start_block) to prevent getting stuck."
                 )
             return BlockDeterminationResult(
-                final_block_number=new_last_block,
-                resetting_to_latest=resetting_to_latest,
+                final_block_number=final_block,
+                resetting_to_latest=False,
             )
 
         # Main logic: latest_block is available, verify against it
