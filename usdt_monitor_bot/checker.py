@@ -506,7 +506,7 @@ class TransactionChecker:
         self,
         start_block: int,
         new_last_block: int,
-        raw_transactions: list,
+        raw_transactions: List[dict],
         address_lower: str,
     ) -> tuple[int, bool]:
         """
