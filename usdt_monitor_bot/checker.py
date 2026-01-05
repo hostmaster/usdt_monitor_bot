@@ -570,7 +570,7 @@ class TransactionChecker:
                     )
                     latest_block = None
 
-                if latest_block:
+                if latest_block is not None:
                     if latest_block < start_block:
                         # Database start_block is ahead of blockchain - reset to latest_block
                         logging.warning(
