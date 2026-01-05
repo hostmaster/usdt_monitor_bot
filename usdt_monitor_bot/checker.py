@@ -590,18 +590,18 @@ class TransactionChecker:
                     elif len(raw_transactions) == 0 and new_last_block == start_block:
                         # No transactions found and blockchain hasn't advanced - update to latest_block
                         # This prevents getting stuck on the same block
+                        # Note: latest_block >= start_block is guaranteed by the preceding checks
                         if latest_block > start_block:
                             logging.debug(
                                 f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
                             )
-                            new_last_block = latest_block
-                        elif latest_block == start_block:
+                        else:  # latest_block == start_block
                             logging.debug(
                                 f"Blockchain hasn't advanced for {address_lower}. "
                                 f"Latest block ({latest_block}) equals start_block ({start_block}). "
                                 f"Updating to {latest_block} to record check."
                             )
-                            new_last_block = latest_block
+                        new_last_block = latest_block
                 else:
                     # If we can't get latest block (None or exception), only advance if no transactions found
                     if len(raw_transactions) == 0 and new_last_block == start_block:
