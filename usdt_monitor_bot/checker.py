@@ -527,15 +527,8 @@ class TransactionChecker:
         resetting_to_latest = False
         query_start_block = start_block + 1
 
-        try:
-            latest_block = await self._etherscan.get_latest_block_number()
-        except (EtherscanError, aiohttp.ClientError, asyncio.TimeoutError) as e:
-            # If API call fails, treat as if latest_block is None
-            logging.warning(
-                f"Error getting latest block for {address_lower}: {e}. "
-                "Will use fallback logic if needed."
-            )
-            latest_block = None
+        # get_latest_block_number handles exceptions internally and returns None on failure
+        latest_block = await self._etherscan.get_latest_block_number()
 
         if latest_block is not None:
             if latest_block < start_block:
