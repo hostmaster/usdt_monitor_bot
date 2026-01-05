@@ -77,9 +77,7 @@ class TransactionChecker:
                 f"Rate limited while fetching {token_symbol} for {address_lower}. "
                 "Some transactions may be missed in this cycle."
             )
-            return
-
-        if isinstance(error, EtherscanError):
+        elif isinstance(error, EtherscanError):
             error_msg = str(error)
             # Skip logging for "No transactions found" - expected for inactive addresses
             if "No transactions found" in error_msg:
@@ -94,13 +92,12 @@ class TransactionChecker:
                 logging.error(
                     f"Error checking {token_symbol} transactions for {address_lower}: {error_msg}"
                 )
-            return
-
-        # Unexpected error
-        logging.error(
-            f"Unexpected error fetching {token_symbol} for {address_lower}: {error}",
-            exc_info=True,
-        )
+        else:
+            # Unexpected error
+            logging.error(
+                f"Unexpected error fetching {token_symbol} for {address_lower}: {error}",
+                exc_info=True,
+            )
 
     async def _fetch_transactions_for_address(
         self, address_lower: str, query_start_block: int
