@@ -487,12 +487,14 @@ class TransactionChecker:
             return (max(start_block, max_seen_block), 0)
 
         user_ids = await self._db.get_users_for_address(address_lower)
-        processed_count = len(processing_batch)
         if not user_ids:
             logging.warning(
-                f"Found {processed_count} tx(s) for {address_lower}, but no users are tracking it."
+                f"Found {len(processing_batch)} tx(s) for {address_lower}, but no users are tracking it."
             )
+            # No users tracking this address, so nothing is actually processed
+            processed_count = 0
         else:
+            processed_count = len(processing_batch)
             logging.info(f"Processing {processed_count} new tx(s) for {address_lower}")
             await self._send_notifications_for_batch(
                 user_ids, processing_batch, address_lower
