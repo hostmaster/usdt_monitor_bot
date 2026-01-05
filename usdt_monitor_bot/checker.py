@@ -8,6 +8,7 @@ and performs spam detection analysis.
 # Standard library
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
@@ -457,7 +458,7 @@ class TransactionChecker:
 
     async def _process_address_transactions(
         self, address_lower: str, all_transactions: list[dict], start_block: int
-    ) -> int:
+    ) -> tuple[int, int]:
         """
         Orchestrate filtering, notification, and determine the max block to update to.
 
@@ -467,12 +468,12 @@ class TransactionChecker:
             start_block: The starting block number
 
         Returns:
-            The highest block number seen in the transactions
+            Tuple of (highest_block_number, processed_transaction_count)
         """
         if not all_transactions:
             # No transactions found - return start_block to indicate we've checked up to this point
             # The caller will update the block number to record the check
-            return start_block
+            return (start_block, 0)
 
         # Always update to the highest block seen to avoid re-scanning
         max_seen_block = max(int(tx.get("blockNumber", 0)) for tx in all_transactions)
@@ -483,22 +484,21 @@ class TransactionChecker:
             logging.debug(
                 f"No transactions to notify for {address_lower} after filtering."
             )
-            return max(start_block, max_seen_block)
+            return (max(start_block, max_seen_block), 0)
 
         user_ids = await self._db.get_users_for_address(address_lower)
+        processed_count = len(processing_batch)
         if not user_ids:
             logging.warning(
-                f"Found {len(processing_batch)} tx(s) for {address_lower}, but no users are tracking it."
+                f"Found {processed_count} tx(s) for {address_lower}, but no users are tracking it."
             )
         else:
-            logging.info(
-                f"Processing {len(processing_batch)} new tx(s) for {address_lower}"
-            )
+            logging.info(f"Processing {processed_count} new tx(s) for {address_lower}")
             await self._send_notifications_for_batch(
                 user_ids, processing_batch, address_lower
             )
 
-        return max(start_block, max_seen_block)
+        return (max(start_block, max_seen_block), processed_count)
 
     async def check_all_addresses(self) -> None:
         """
@@ -508,12 +508,25 @@ class TransactionChecker:
         transactions for each address, updating block numbers and sending
         notifications as needed.
         """
-        logging.info("Starting transaction check cycle...")
+        cycle_start_time = time.time()
         addresses_to_check = await self._db.get_distinct_addresses()
 
         if not addresses_to_check:
-            logging.info("No addresses found in the database to check.")
+            logging.info("Transaction check cycle: No addresses to monitor.")
             return
+
+        logging.info("Starting transaction check cycle...")
+        logging.debug(
+            f"Checking {len(addresses_to_check)} address(es) for new transactions"
+        )
+
+        # Statistics tracking
+        total_transactions_found = 0
+        total_transactions_processed = 0
+        addresses_with_transactions = 0
+        addresses_updated = 0
+        errors_count = 0
+        warnings_count = 0
 
         update_tasks = []
         for address in addresses_to_check:
@@ -529,13 +542,22 @@ class TransactionChecker:
                     address_lower, query_start_block
                 )
 
-                new_last_block = await self._process_address_transactions(
+                total_transactions_found += len(raw_transactions)
+                if raw_transactions:
+                    addresses_with_transactions += 1
+
+                (
+                    new_last_block,
+                    processed_count,
+                ) = await self._process_address_transactions(
                     address_lower, raw_transactions, start_block
                 )
+                total_transactions_processed += processed_count
 
                 # If no transactions found, get the latest block number to advance progress
                 # This prevents the bot from getting stuck on the same block
                 # Check both: empty list and new_last_block equals start_block
+                resetting_to_latest = False
                 if len(raw_transactions) == 0 and new_last_block == start_block:
                     logging.debug(
                         f"No transactions found for {address_lower} from block {query_start_block}. "
@@ -543,19 +565,32 @@ class TransactionChecker:
                     )
                     try:
                         latest_block = await self._etherscan.get_latest_block_number()
-                        if latest_block and latest_block > start_block:
+                        if latest_block and latest_block >= start_block:
                             # Update to latest block to indicate we've checked up to current blockchain state
+                            # This handles both latest_block > start_block and latest_block == start_block cases
                             new_last_block = latest_block
-                            logging.debug(
-                                f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
-                            )
+                            if latest_block > start_block:
+                                logging.debug(
+                                    f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
+                                )
+                            else:
+                                # latest_block == start_block: blockchain hasn't advanced since last check
+                                # Still update to record that we've checked up to this point
+                                logging.debug(
+                                    f"Blockchain hasn't advanced for {address_lower}. "
+                                    f"Latest block ({latest_block}) equals start_block ({start_block}). "
+                                    f"Updating to {latest_block} to record check."
+                                )
                         elif latest_block:
-                            # Latest block is <= start_block (shouldn't happen, but handle it)
+                            # Latest block is < start_block: database is ahead of blockchain
+                            # This can happen due to chain reorganization, database corruption, or manual updates
+                            # Reset to latest_block to sync with actual blockchain state
                             logging.warning(
-                                f"Latest block ({latest_block}) <= start_block ({start_block}) for {address_lower}. "
-                                f"This shouldn't happen. Staying at {start_block}."
+                                f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
+                                f"Database appears ahead of blockchain. Resetting to latest_block ({latest_block}) to sync."
                             )
-                            new_last_block = start_block
+                            new_last_block = latest_block
+                            resetting_to_latest = True
                         else:
                             # If we can't get latest block, advance by at least 1 block
                             # This ensures we don't check the same block again
@@ -573,8 +608,15 @@ class TransactionChecker:
                         new_last_block = query_start_block
 
                 # Always update block number to prevent getting stuck
-                if new_last_block >= start_block:
-                    if new_last_block > start_block:
+                # Allow update even if new_last_block < start_block when we're resetting to sync with blockchain
+                # Note: new_last_block is always >= start_block unless resetting_to_latest is True,
+                # so this condition will always be true
+                if new_last_block >= start_block or resetting_to_latest:
+                    if resetting_to_latest:
+                        logging.info(
+                            f"Resetting block for {address_lower} from {start_block} to {new_last_block} to sync with blockchain"
+                        )
+                    elif new_last_block > start_block:
                         logging.debug(
                             f"Updating block for {address_lower} from {start_block} to {new_last_block}"
                         )
@@ -587,19 +629,19 @@ class TransactionChecker:
                             address_lower, new_last_block
                         )
                     )
-                else:
-                    logging.warning(
-                        f"Unexpected: new_last_block ({new_last_block}) < start_block ({start_block}) for {address_lower}"
-                    )
+                    addresses_updated += 1
             except EtherscanRateLimitError:
                 logging.warning(f"Rate limit for {address_lower}. Skipping this cycle.")
+                warnings_count += 1
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logging.error(f"Network error for {address_lower}: {e}. Skipping.")
+                errors_count += 1
             except Exception as e:
                 logging.error(
                     f"Critical error in check cycle for {address_lower}: {e}",
                     exc_info=True,
                 )
+                errors_count += 1
 
         if update_tasks:
             logging.debug(
@@ -607,4 +649,31 @@ class TransactionChecker:
             )
             await asyncio.gather(*update_tasks, return_exceptions=True)
 
-        logging.info("Transaction check cycle complete.")
+        cycle_duration = time.time() - cycle_start_time
+
+        # Log summary at INFO level (simple)
+        if total_transactions_processed > 0:
+            logging.info(
+                f"Transaction check cycle complete: processed {total_transactions_processed} new transaction(s) in {cycle_duration:.2f}s"
+            )
+        elif errors_count > 0 or warnings_count > 0:
+            status_parts = []
+            if errors_count > 0:
+                status_parts.append(f"{errors_count} error(s)")
+            if warnings_count > 0:
+                status_parts.append(f"{warnings_count} warning(s)")
+            logging.info(
+                f"Transaction check cycle complete: {', '.join(status_parts)} in {cycle_duration:.2f}s"
+            )
+        else:
+            logging.info(f"Transaction check cycle complete in {cycle_duration:.2f}s")
+
+        # Log detailed statistics at DEBUG level
+        logging.debug(
+            f"Cycle statistics: checked {len(addresses_to_check)} address(es), "
+            f"found {total_transactions_found} transaction(s), "
+            f"processed {total_transactions_processed} new transaction(s) "
+            f"from {addresses_with_transactions} address(es), "
+            f"updated {addresses_updated} address(es), "
+            f"{errors_count} error(s), {warnings_count} warning(s)"
+        )
