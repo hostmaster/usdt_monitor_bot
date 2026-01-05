@@ -533,19 +533,19 @@ class TransactionChecker:
         if latest_block is not None:
             # Always ensure we never advance beyond the actual blockchain
             # This prevents getting ahead due to stale/forked transaction data
-            if new_last_block > latest_block:
-                # new_last_block is ahead of actual blockchain - cap it to latest_block
-                logging.warning(
-                    f"new_last_block ({new_last_block}) > latest_block ({latest_block}) for {address_lower}. "
-                    f"Capping to latest_block to prevent database from getting ahead of blockchain."
-                )
-                new_last_block = latest_block
-                resetting_to_latest = True
-            elif latest_block < start_block:
+            if latest_block < start_block:
                 # Database start_block is ahead of blockchain - reset to latest_block
                 logging.warning(
                     f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
                     f"Database appears ahead of blockchain. Resetting to latest_block ({latest_block}) to sync."
+                )
+                new_last_block = latest_block
+                resetting_to_latest = True
+            elif new_last_block > latest_block:
+                # new_last_block is ahead of actual blockchain - cap it to latest_block
+                logging.warning(
+                    f"new_last_block ({new_last_block}) > latest_block ({latest_block}) for {address_lower}. "
+                    f"Capping to latest_block to prevent database from getting ahead of blockchain."
                 )
                 new_last_block = latest_block
                 resetting_to_latest = True
