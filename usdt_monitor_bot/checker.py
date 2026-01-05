@@ -531,15 +531,9 @@ class TransactionChecker:
         latest_block = await self._etherscan.get_latest_block_number()
 
         if latest_block is not None:
-            if latest_block < start_block:
-                # Database start_block is ahead of blockchain - reset to latest_block
-                logging.warning(
-                    f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
-                    f"Database appears ahead of blockchain. Resetting to latest_block ({latest_block}) to sync."
-                )
-                new_last_block = latest_block
-                resetting_to_latest = True
-            elif latest_block < new_last_block:
+            # Always ensure we never advance beyond the actual blockchain
+            # This prevents getting ahead due to stale/forked transaction data
+            if new_last_block > latest_block:
                 # new_last_block is ahead of actual blockchain - cap it to latest_block
                 logging.warning(
                     f"new_last_block ({new_last_block}) > latest_block ({latest_block}) for {address_lower}. "
@@ -547,10 +541,18 @@ class TransactionChecker:
                 )
                 new_last_block = latest_block
                 resetting_to_latest = True
+            elif latest_block < start_block:
+                # Database start_block is ahead of blockchain - reset to latest_block
+                logging.warning(
+                    f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
+                    f"Database appears ahead of blockchain. Resetting to latest_block ({latest_block}) to sync."
+                )
+                new_last_block = latest_block
+                resetting_to_latest = True
             elif len(raw_transactions) == 0 and new_last_block == start_block:
                 # No transactions found and blockchain hasn't advanced - update to latest_block
                 # This prevents getting stuck on the same block
-                # Note: latest_block >= start_block is guaranteed by the preceding checks
+                # Note: latest_block >= start_block and latest_block >= new_last_block are guaranteed here
                 if latest_block > start_block:
                     logging.debug(
                         f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
