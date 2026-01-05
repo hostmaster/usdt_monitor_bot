@@ -587,9 +587,7 @@ class TransactionChecker:
                         )
                         new_last_block = latest_block
                         resetting_to_latest = True
-                    elif (
-                        len(raw_transactions) == 0 and new_last_block == start_block
-                    ):
+                    elif len(raw_transactions) == 0 and new_last_block == start_block:
                         # No transactions found and blockchain hasn't advanced - update to latest_block
                         # This prevents getting stuck on the same block
                         if latest_block > start_block:
