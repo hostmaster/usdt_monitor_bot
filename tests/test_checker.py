@@ -189,6 +189,8 @@ async def test_check_single_address_with_tx(
     mock_db.get_users_for_address.return_value = [USER1]
     # Assume all test transactions are for USDT
     mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    # Mock latest block to be >= final_block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = final_block + 100
 
     await checker.check_all_addresses()
 
@@ -226,6 +228,8 @@ async def test_check_multiple_addresses(
         [],
         [tx2],  # ADDR2: no USDT tx, USDC tx
     ]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -284,6 +288,8 @@ async def test_transaction_age_filtering(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [[recent_tx, old_tx], []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -316,6 +322,9 @@ async def test_transaction_count_limiting(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    latest_block = BLOCK_ADDR1_START + tx_count
+    mock_etherscan.get_latest_block_number.return_value = latest_block + 100
 
     await checker.check_all_addresses()
 
@@ -326,7 +335,6 @@ async def test_transaction_count_limiting(
     )
 
     # The latest block processed should be the newest of all transactions
-    latest_block = BLOCK_ADDR1_START + tx_count
     mock_db.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), latest_block
     )
@@ -347,6 +355,8 @@ async def test_invalid_timestamp_is_skipped(
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
     mock_etherscan.get_token_transactions.side_effect = [[valid_tx, invalid_tx], []]
+    # Mock latest block to be >= highest block to avoid reset logic
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -395,3 +405,163 @@ async def test_fetch_transactions_partial_failure(
 
     assert len(result) == 1
     assert result[0]["token_symbol"] == "USDC"
+
+
+# --- Unit Tests for `_determine_next_block` ---
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_database_ahead_of_blockchain(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test that database block ahead of blockchain is reset to latest_block."""
+    start_block = 1000
+    new_last_block = 1005
+    latest_block = 995  # Blockchain is behind database
+    address_lower = ADDR1.lower()
+
+    mock_etherscan.get_latest_block_number.return_value = latest_block
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, [], address_lower
+    )
+
+    assert result.final_block_number == latest_block
+    assert result.resetting_to_latest is True
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_transaction_ahead_of_blockchain(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test that transaction block ahead of blockchain is capped to latest_block."""
+    start_block = 1000
+    new_last_block = 1010  # From transaction, ahead of blockchain
+    latest_block = 1005  # Actual blockchain is behind transaction
+    address_lower = ADDR1.lower()
+    transactions = [create_mock_tx(1010, "0xsender", ADDR1, USDT_CONTRACT)]
+
+    mock_etherscan.get_latest_block_number.return_value = latest_block
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, transactions, address_lower
+    )
+
+    assert result.final_block_number == latest_block
+    assert result.resetting_to_latest is True
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_both_ahead_of_blockchain(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test when both start_block and new_last_block are ahead of blockchain.
+
+    The start_block check should take precedence and reset to latest_block.
+    """
+    start_block = 1010  # Database ahead
+    new_last_block = 1015  # Transaction also ahead
+    latest_block = 1000  # Blockchain is behind both
+    address_lower = ADDR1.lower()
+    transactions = [create_mock_tx(1015, "0xsender", ADDR1, USDT_CONTRACT)]
+
+    mock_etherscan.get_latest_block_number.return_value = latest_block
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, transactions, address_lower
+    )
+
+    # Should reset to latest_block due to start_block check (first condition)
+    assert result.final_block_number == latest_block
+    assert result.resetting_to_latest is True
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_normal_case_no_reset(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test normal case where no reset is needed."""
+    start_block = 1000
+    new_last_block = 1005  # From transaction
+    latest_block = 1010  # Blockchain is ahead, everything is normal
+    address_lower = ADDR1.lower()
+    transactions = [create_mock_tx(1005, "0xsender", ADDR1, USDT_CONTRACT)]
+
+    mock_etherscan.get_latest_block_number.return_value = latest_block
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, transactions, address_lower
+    )
+
+    # Should keep new_last_block as it's valid
+    assert result.final_block_number == new_last_block
+    assert result.resetting_to_latest is False
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_no_transactions_advances_to_latest(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test that when no transactions found, block advances to latest_block."""
+    start_block = 1000
+    new_last_block = 1000  # No transactions, stayed at start_block
+    latest_block = 1005  # Blockchain has advanced
+    address_lower = ADDR1.lower()
+
+    mock_etherscan.get_latest_block_number.return_value = latest_block
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, [], address_lower
+    )
+
+    # Should advance to latest_block to prevent getting stuck
+    assert result.final_block_number == latest_block
+    assert result.resetting_to_latest is False
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_latest_block_none_guard_clause(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test guard clause when latest_block cannot be fetched (returns None)."""
+    start_block = 1000
+    new_last_block = 1000  # No transactions
+    address_lower = ADDR1.lower()
+
+    mock_etherscan.get_latest_block_number.return_value = None
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, [], address_lower
+    )
+
+    # Should advance to query_start_block to prevent getting stuck
+    assert result.final_block_number == start_block + 1
+    assert result.resetting_to_latest is False
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_determine_next_block_latest_block_none_with_transactions(
+    checker: TransactionChecker, mock_etherscan: AsyncMock
+):
+    """Test guard clause when latest_block is None but transactions were found."""
+    start_block = 1000
+    new_last_block = 1005  # From transaction
+    address_lower = ADDR1.lower()
+    transactions = [create_mock_tx(1005, "0xsender", ADDR1, USDT_CONTRACT)]
+
+    mock_etherscan.get_latest_block_number.return_value = None
+
+    result = await checker._determine_next_block(
+        start_block, new_last_block, transactions, address_lower
+    )
+
+    # Should keep new_last_block since transactions were found
+    assert result.final_block_number == new_last_block
+    assert result.resetting_to_latest is False
+    mock_etherscan.get_latest_block_number.assert_awaited_once()
