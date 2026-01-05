@@ -556,53 +556,57 @@ class TransactionChecker:
                 )
                 total_transactions_processed += processed_count
 
-                # If no transactions found, get the latest block number to advance progress
-                # This prevents the bot from getting stuck on the same block
-                # Check both: empty list and new_last_block equals start_block
+                # Always verify new_last_block against actual blockchain to prevent getting ahead
+                # This is critical because max_seen_block from transactions might be ahead of blockchain
+                # due to chain reorganizations, stale data, or other issues
                 resetting_to_latest = False
-                if len(raw_transactions) == 0 and new_last_block == start_block:
-                    logging.debug(
-                        f"No transactions found for {address_lower} from block {query_start_block}. "
-                        f"Fetching latest block number to advance progress..."
-                    )
-                    try:
-                        latest_block = await self._etherscan.get_latest_block_number()
-                        if latest_block and latest_block >= start_block:
-                            # Update to latest block to indicate we've checked up to current blockchain state
-                            # This handles both latest_block > start_block and latest_block == start_block cases
+                try:
+                    latest_block = await self._etherscan.get_latest_block_number()
+                    if latest_block:
+                        if latest_block < new_last_block:
+                            # new_last_block is ahead of actual blockchain - cap it to latest_block
+                            logging.warning(
+                                f"new_last_block ({new_last_block}) > latest_block ({latest_block}) for {address_lower}. "
+                                f"Capping to latest_block to prevent database from getting ahead of blockchain."
+                            )
                             new_last_block = latest_block
-                            if latest_block > start_block:
-                                logging.debug(
-                                    f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
-                                )
-                            else:
-                                # latest_block == start_block: blockchain hasn't advanced since last check
-                                # Still update to record that we've checked up to this point
-                                logging.debug(
-                                    f"Blockchain hasn't advanced for {address_lower}. "
-                                    f"Latest block ({latest_block}) equals start_block ({start_block}). "
-                                    f"Updating to {latest_block} to record check."
-                                )
-                        elif latest_block:
-                            # Latest block is < start_block: database is ahead of blockchain
-                            # This can happen due to chain reorganization, database corruption, or manual updates
-                            # Reset to latest_block to sync with actual blockchain state
+                            resetting_to_latest = True
+                        elif latest_block < start_block:
+                            # Database start_block is ahead of blockchain - reset to latest_block
                             logging.warning(
                                 f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
                                 f"Database appears ahead of blockchain. Resetting to latest_block ({latest_block}) to sync."
                             )
                             new_last_block = latest_block
                             resetting_to_latest = True
-                        else:
-                            # If we can't get latest block, advance by at least 1 block
-                            # This ensures we don't check the same block again
-                            # We've queried from query_start_block, so we've checked up to that point
+                        elif (
+                            len(raw_transactions) == 0 and new_last_block == start_block
+                        ):
+                            # No transactions found and blockchain hasn't advanced - update to latest_block
+                            # This prevents getting stuck on the same block
+                            if latest_block > start_block:
+                                logging.debug(
+                                    f"Advancing block for {address_lower} from {start_block} to latest block {latest_block}"
+                                )
+                                new_last_block = latest_block
+                            elif latest_block == start_block:
+                                logging.debug(
+                                    f"Blockchain hasn't advanced for {address_lower}. "
+                                    f"Latest block ({latest_block}) equals start_block ({start_block}). "
+                                    f"Updating to {latest_block} to record check."
+                                )
+                                new_last_block = latest_block
+                    else:
+                        # If we can't get latest block, only advance if no transactions found
+                        if len(raw_transactions) == 0 and new_last_block == start_block:
                             new_last_block = query_start_block
                             logging.warning(
                                 f"Could not get latest block number for {address_lower}. "
                                 f"Advancing from {start_block} to {new_last_block} (query_start_block) to prevent getting stuck."
                             )
-                    except Exception as e:
+                except Exception as e:
+                    # If we can't get latest block, only advance if no transactions found
+                    if len(raw_transactions) == 0 and new_last_block == start_block:
                         logging.warning(
                             f"Error getting latest block for {address_lower}: {e}. "
                             f"Advancing from {start_block} to {query_start_block} to prevent getting stuck."
