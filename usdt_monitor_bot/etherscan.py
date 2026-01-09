@@ -48,6 +48,11 @@ class EtherscanClient:
         self._session = None
         logging.debug("EtherscanClient initialized.")
 
+    async def _ensure_session(self):
+        """Ensure a session exists, creating one if necessary."""
+        if self._session is None or (hasattr(self._session, 'closed') and self._session.closed):
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+
     async def __aenter__(self):
         """Create a new session when entering the context."""
         self._session = aiohttp.ClientSession(timeout=self._timeout)
@@ -88,8 +93,7 @@ class EtherscanClient:
             EtherscanRateLimitError: If the API rate limit is exceeded
             EtherscanError: For other API errors
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",  # Ethereum mainnet - required for V2 API
@@ -172,8 +176,7 @@ class EtherscanClient:
             This uses Etherscan's "getcontractcreation" API which returns the creation
             transaction hash and block number directly.
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",
@@ -242,8 +245,7 @@ class EtherscanClient:
         Returns:
             The latest block number, or None if unable to fetch
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",
@@ -301,5 +303,20 @@ class EtherscanClient:
     async def close(self):
         """Close the session if it exists."""
         if self._session:
-            await self._session.close()
-            self._session = None
+            try:
+                # Always attempt to close - aiohttp sessions handle already-closed gracefully
+                # For mocks, this ensures close() is called
+                await self._session.close()
+                # Wait 0.1 seconds for connections to close gracefully.
+                # This brief delay allows aiohttp's connection pool to properly release
+                # file descriptors and close underlying TCP connections before the event
+                # loop continues. Without this, connections may not be fully closed when
+                # the session.close() coroutine completes, potentially leading to resource leaks.
+                await asyncio.sleep(0.1)
+            except (aiohttp.ClientError, RuntimeError) as e:
+                # If closing fails (e.g., already closed or event loop closed), log and continue
+                logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
+            except Exception as e:
+                # Catch any other unexpected errors but log them
+                logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
+        self._session = None

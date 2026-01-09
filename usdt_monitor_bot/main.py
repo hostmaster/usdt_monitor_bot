@@ -101,7 +101,8 @@ async def main() -> None:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         logging.info("Shutting down...")
-        scheduler.shutdown()
+        scheduler.shutdown(wait=True)  # Wait for running jobs to complete
+        await etherscan_client.close()
         await bot.session.close()
         logging.info("Scheduler shut down. Bot session closed. Exiting.")
 
