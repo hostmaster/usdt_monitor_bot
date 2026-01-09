@@ -51,7 +51,7 @@ class EtherscanClient:
 
     async def _ensure_session(self):
         """Ensure a session exists, creating one if necessary."""
-        if self._session is None or (hasattr(self._session, 'closed') and self._session.closed):
+        if not self._session or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=self._timeout)
             self._closed = False
 
