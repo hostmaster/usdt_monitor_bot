@@ -56,18 +56,14 @@ class EtherscanClient:
         coroutines try to create a session concurrently.
         """
         # Check if session exists outside the lock for better performance
-        if self._session is not None and not (
-            hasattr(self._session, 'closed') and self._session.closed
-        ):
+        if self._session and not getattr(self._session, 'closed', True):
             return
 
         # Acquire lock to prevent concurrent session creation
         async with self._session_lock:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
-            if self._session is None or (
-                hasattr(self._session, 'closed') and self._session.closed
-            ):
+            if not self._session or getattr(self._session, 'closed', True):
                 self._session = aiohttp.ClientSession(timeout=self._timeout)
 
     async def __aenter__(self):
