@@ -46,12 +46,25 @@ class EtherscanClient:
         self._api_key = config.etherscan_api_key
         self._timeout = ClientTimeout(total=30)  # 30 seconds timeout
         self._session = None
+        self._session_lock = asyncio.Lock()  # Protect session creation from race conditions
         logging.debug("EtherscanClient initialized.")
 
     async def _ensure_session(self):
-        """Ensure a session exists, creating one if necessary."""
-        if self._session is None or (hasattr(self._session, 'closed') and self._session.closed):
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        """Ensure a session exists, creating one if necessary.
+
+        Thread-safe: Uses a lock to prevent race conditions when multiple
+        coroutines try to create a session concurrently.
+        """
+        # Check if session exists outside the lock for better performance
+        if self._session and not getattr(self._session, 'closed', True):
+            return
+
+        # Acquire lock to prevent concurrent session creation
+        async with self._session_lock:
+            # Double-check pattern: another coroutine may have created the session
+            # while we were waiting for the lock
+            if not self._session or getattr(self._session, 'closed', True):
+                self._session = aiohttp.ClientSession(timeout=self._timeout)
 
     async def __aenter__(self):
         """Create a new session when entering the context."""

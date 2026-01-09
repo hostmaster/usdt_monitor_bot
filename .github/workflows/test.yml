@@ -2,12 +2,14 @@
 name: Test
 
 on:
-  push:
+  pull_request:
     paths:
       - "**.py"
       - "pyproject.toml"
       - "tests/**"
-  pull_request:
+  push:
+    branches:
+      - main
     paths:
       - "**.py"
       - "pyproject.toml"
