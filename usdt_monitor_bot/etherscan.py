@@ -46,7 +46,14 @@ class EtherscanClient:
         self._api_key = config.etherscan_api_key
         self._timeout = ClientTimeout(total=30)  # 30 seconds timeout
         self._session = None
+        self._closed = False
         logging.debug("EtherscanClient initialized.")
+
+    async def _ensure_session(self):
+        """Ensure a session exists, creating one if necessary."""
+        if self._session is None or (hasattr(self._session, 'closed') and self._session.closed):
+            self._session = aiohttp.ClientSession(timeout=self._timeout)
+            self._closed = False
 
     async def __aenter__(self):
         """Create a new session when entering the context."""
@@ -88,8 +95,7 @@ class EtherscanClient:
             EtherscanRateLimitError: If the API rate limit is exceeded
             EtherscanError: For other API errors
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",  # Ethereum mainnet - required for V2 API
@@ -172,8 +178,7 @@ class EtherscanClient:
             This uses Etherscan's "getcontractcreation" API which returns the creation
             transaction hash and block number directly.
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",
@@ -242,8 +247,7 @@ class EtherscanClient:
         Returns:
             The latest block number, or None if unable to fetch
         """
-        if not self._session:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+        await self._ensure_session()
 
         params = {
             "chainid": "1",
@@ -301,5 +305,14 @@ class EtherscanClient:
     async def close(self):
         """Close the session if it exists."""
         if self._session:
-            await self._session.close()
-            self._session = None
+            try:
+                # Always attempt to close - aiohttp sessions handle already-closed gracefully
+                # For mocks, this ensures close() is called
+                await self._session.close()
+                # Wait a bit for connections to close gracefully
+                await asyncio.sleep(0.1)
+            except Exception:
+                # If closing fails (e.g., already closed), just continue
+                pass
+        self._session = None
+        self._closed = True
