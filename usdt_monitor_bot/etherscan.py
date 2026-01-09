@@ -311,8 +311,11 @@ class EtherscanClient:
                 await self._session.close()
                 # Wait a bit for connections to close gracefully
                 await asyncio.sleep(0.1)
-            except Exception:
-                # If closing fails (e.g., already closed), just continue
-                pass
+            except (aiohttp.ClientError, RuntimeError) as e:
+                # If closing fails (e.g., already closed or event loop closed), log and continue
+                logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
+            except Exception as e:
+                # Catch any other unexpected errors but log them
+                logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
         self._session = None
         self._closed = True
