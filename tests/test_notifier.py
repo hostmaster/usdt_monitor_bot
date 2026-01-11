@@ -326,3 +326,41 @@ async def test_send_token_notification_large_value(
     assert "🔔 New USDT Transfer!" in message
     assert "From: <code>0xsender</code>" in message  # Incoming
     assert "Amount: <b>1000000.00 USDT</b>" in message
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_spam_short_notice(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test that spam transactions send a short notice instead of full details."""
+    from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
+
+    monitored_address_val = TX1_INCOMING_USDT["to"]
+    spam_tx = TX1_INCOMING_USDT.copy()
+
+    # Create a suspicious risk analysis
+    risk_analysis = RiskAnalysis(
+        score=75,
+        flags=[RiskFlag.DUST_AMOUNT, RiskFlag.NEW_SENDER_ADDRESS],
+        is_suspicious=True,
+        similarity_score=0,
+        recommendation="⚠️ HIGH RISK - Suspicious address detected.",
+        details={},
+    )
+
+    await notifier.send_token_notification(
+        USER1, spam_tx, "USDT", monitored_address_val, risk_analysis=risk_analysis
+    )
+    mock_telegram_bot.send_message.assert_called_once()
+    message = mock_telegram_bot.send_message.call_args[1]["text"]
+
+    # Should be a short spam notice, not full transaction details
+    assert "⚠️ <b>Spam Detected</b>" in message
+    assert "From:" in message
+    assert "Amount:" in message
+    assert "Risk:" in message
+    # Should NOT contain full transaction details
+    assert "🔔 New USDT Transfer!" not in message
+    assert "Time:" not in message
+    assert "View on Etherscan" not in message  # Should be just "View"
+    assert "View" in message  # Short link text

@@ -145,24 +145,31 @@ class NotificationService:
                 )
                 return None
 
+            # For spam transactions, send a short notice instead of full details
+            if risk_analysis and risk_analysis.is_suspicious:
+                # Short spam notice
+                try:
+                    # Get main flag for brief description
+                    main_flag = risk_analysis.flags[0].value if risk_analysis.flags else "Suspicious"
+                    # address_to_show is already formatted by format_address() above
+                    message = (
+                        f"⚠️ {hbold('Spam Detected')}\n"
+                        f"From: {hcode(address_to_show)}\n"
+                        f"Amount: {formatted_value} {token_config.symbol}\n"
+                        f"Risk: {risk_analysis.score}/100 ({main_flag})\n"
+                        f"Tx: {hlink('View', f'{token_config.explorer_url}/tx/{tx_hash}')}"
+                    )
+                    return message
+                except Exception as e:
+                    logging.error(
+                        f"Error constructing spam notice for transaction {tx_hash}: {e}",
+                        exc_info=True,
+                    )
+                    return None
+
+            # Normal transaction - full details
             # Determine the direction label
             address_label = "From" if is_incoming else "To"
-
-            # Add risk warning if transaction is suspicious
-            risk_warning = ""
-            if risk_analysis and risk_analysis.is_suspicious:
-                risk_warning = (
-                    "\n\n"
-                    f"⚠️ {hbold('SPAM RISK DETECTED')} ⚠️\n"
-                    f"Risk Score: {risk_analysis.score}/100\n"
-                )
-                if risk_analysis.flags:
-                    flags_text = ", ".join(
-                        [flag.value for flag in risk_analysis.flags[:3]]
-                    )  # Show first 3 flags
-                    risk_warning += f"Flags: {flags_text}\n"
-                if risk_analysis.recommendation:
-                    risk_warning += f"\n{risk_analysis.recommendation}\n"
 
             # Construct the message with proper error handling
             try:
@@ -172,7 +179,6 @@ class NotificationService:
                     f"{address_label}: {hcode(address_to_show)}\n"
                     f"Time: {formatted_time}\n"
                     f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
-                    f"{risk_warning}"
                 )
                 return message
             except Exception as e:
