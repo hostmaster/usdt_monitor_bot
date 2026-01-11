@@ -568,25 +568,21 @@ class TransactionChecker:
             # No transactions found - return start_block to indicate we've checked up to this point
             # The caller will update the block number to record the check
             # Cap start_block to latest_block if available to prevent getting ahead of blockchain
-            final_block = start_block
-            if latest_block is not None and start_block > latest_block:
-                logging.debug(
-                    f"Capping start_block ({start_block}) to latest_block ({latest_block}) "
-                    f"for {address_lower} (no transactions found) to prevent getting ahead of blockchain."
-                )
-                final_block = latest_block
+            final_block = self._cap_block_to_latest(
+                start_block,
+                latest_block,
+                address_lower,
+                context="no transactions found",
+            )
             return (final_block, 0)
 
         # Always update to the highest block seen to avoid re-scanning
         # But cap it to latest_block if available to prevent getting ahead of blockchain
         tx_block_numbers = [int(tx.get("blockNumber", 0)) for tx in all_transactions]
         max_seen_block = max(tx_block_numbers) if tx_block_numbers else 0
-        if latest_block is not None and max_seen_block > latest_block:
-            logging.debug(
-                f"Capping max_seen_block ({max_seen_block}) to latest_block ({latest_block}) "
-                f"for {address_lower} to prevent getting ahead of blockchain."
-            )
-            max_seen_block = latest_block
+        max_seen_block = self._cap_block_to_latest(
+            max_seen_block, latest_block, address_lower
+        )
 
         processing_batch = self._filter_transactions(all_transactions, start_block)
 
@@ -596,12 +592,12 @@ class TransactionChecker:
             )
             # Cap to latest_block if available to prevent getting ahead of blockchain
             result_block = max(start_block, max_seen_block)
-            if latest_block is not None and result_block > latest_block:
-                logging.debug(
-                    f"Capping result_block ({result_block}) to latest_block ({latest_block}) "
-                    f"for {address_lower} (no transactions after filtering) to prevent getting ahead of blockchain."
-                )
-                result_block = latest_block
+            result_block = self._cap_block_to_latest(
+                result_block,
+                latest_block,
+                address_lower,
+                context="no transactions after filtering",
+            )
             return (result_block, 0)
 
         user_ids = await self._db.get_users_for_address(address_lower)
@@ -621,13 +617,44 @@ class TransactionChecker:
         new_last_block = max(start_block, max_seen_block)
         # Cap new_last_block to latest_block if available to prevent getting ahead of blockchain
         # This handles the case where start_block is already ahead of latest_block
-        if latest_block is not None and new_last_block > latest_block:
-            logging.debug(
-                f"Capping new_last_block ({new_last_block}) to latest_block ({latest_block}) "
-                f"for {address_lower} to prevent getting ahead of blockchain."
-            )
-            new_last_block = latest_block
+        new_last_block = self._cap_block_to_latest(
+            new_last_block, latest_block, address_lower
+        )
         return (new_last_block, processed_count)
+
+    def _cap_block_to_latest(
+        self,
+        block_value: int,
+        latest_block: Optional[int],
+        address_lower: str,
+        context: str = "",
+        log_level: str = "debug",
+    ) -> int:
+        """
+        Cap a block number to the latest blockchain block to prevent getting ahead.
+
+        Args:
+            block_value: The block number to potentially cap
+            latest_block: The latest block number from blockchain (None if unavailable)
+            address_lower: The monitored address for logging
+            context: Additional context for the log message (e.g., "no transactions found")
+            log_level: Logging level - "debug" or "warning" (default: "debug")
+
+        Returns:
+            The capped block value (or original if no capping needed)
+        """
+        if latest_block is not None and block_value > latest_block:
+            context_str = f" ({context})" if context else ""
+            message = (
+                f"Capping {block_value} to latest_block ({latest_block}) "
+                f"for {address_lower}{context_str} to prevent getting ahead of blockchain."
+            )
+            if log_level == "warning":
+                logging.warning(message)
+            else:
+                logging.debug(message)
+            return latest_block
+        return block_value
 
     def _handle_latest_block_unavailable(
         self,
@@ -813,16 +840,13 @@ class TransactionChecker:
                 # Final defensive check: ensure we never update database with a value ahead of blockchain
                 # Fetch latest_block one more time right before update to catch any race conditions
                 final_latest_block = await self._etherscan.get_latest_block_number()
-                final_block_to_update = block_result.final_block_number
-                if (
-                    final_latest_block is not None
-                    and final_block_to_update > final_latest_block
-                ):
-                    logging.warning(
-                        f"Defensive check: final_block ({final_block_to_update}) > latest_block ({final_latest_block}) "
-                        f"for {address_lower}. Capping to {final_latest_block} before database update."
-                    )
-                    final_block_to_update = final_latest_block
+                final_block_to_update = self._cap_block_to_latest(
+                    block_result.final_block_number,
+                    final_latest_block,
+                    address_lower,
+                    context="defensive check before database update",
+                    log_level="warning",
+                )
 
                 self._log_block_update(
                     address_lower, start_block, block_result, final_block_to_update
