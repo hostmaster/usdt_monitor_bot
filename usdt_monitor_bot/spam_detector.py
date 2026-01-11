@@ -193,6 +193,7 @@ class SpamDetector:
         self,
         tx: TransactionMetadata,
         historical_transactions: List[TransactionMetadata],
+        whitelisted_addresses: Optional[Set[str]] = None,
     ) -> RiskAnalysis:
         """
         Comprehensive analysis of transaction for spam/malicious indicators
@@ -200,10 +201,37 @@ class SpamDetector:
         Args:
             tx: Transaction to analyze
             historical_transactions: Previous transactions for comparison
+            whitelisted_addresses: Set of addresses to whitelist (lowercase, no 0x prefix).
+                                   If transaction is from/to a whitelisted address, returns safe analysis.
 
         Returns:
             RiskAnalysis with score, flags, and recommendation
         """
+        # Normalize whitelist addresses for comparison
+        whitelist_normalized = set()
+        if whitelisted_addresses:
+            for addr in whitelisted_addresses:
+                # Normalize: lowercase, remove 0x prefix
+                normalized = addr.lower().replace("0x", "")
+                if len(normalized) == 40:  # Valid Ethereum address length
+                    whitelist_normalized.add(normalized)
+
+        # Check if transaction involves a whitelisted address
+        if whitelist_normalized:
+            tx_from_normalized = tx.from_address.lower().replace("0x", "")
+            tx_to_normalized = tx.to_address.lower().replace("0x", "")
+
+            # If from_address or to_address is whitelisted, return safe analysis
+            if tx_from_normalized in whitelist_normalized or tx_to_normalized in whitelist_normalized:
+                return RiskAnalysis(
+                    score=0,
+                    flags=[],
+                    is_suspicious=False,
+                    similarity_score=0,
+                    recommendation="✅ Whitelisted address - Low risk transaction",
+                    details={"whitelisted": True},
+                )
+
         score = 0
         flags: Set[RiskFlag] = set()
         details = {}

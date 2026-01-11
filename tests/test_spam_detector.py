@@ -805,3 +805,100 @@ class TestEdgeCases:
 
         # Recommendations should differ
         assert recommendation != low_recommendation
+
+
+def test_whitelist_prevents_flagging(detector, base_timestamp):
+    """Test that whitelisted addresses are not flagged as suspicious."""
+    # Create a transaction that would normally be flagged (dust amount, new address, etc.)
+    whitelisted_address = "0x31390eaf4db4013b3d5d9dbcff494e689589ae83"
+
+    suspicious_tx = TransactionMetadata(
+        tx_hash="0x123",
+        from_address=whitelisted_address,  # From whitelisted address
+        to_address="0xRecipient123",
+        value=Decimal("0.01"),  # Dust amount
+        block_number=19000000,
+        timestamp=base_timestamp,
+        is_new_address=True,  # Would normally trigger flag
+        contract_age_blocks=2,  # Brand new contract
+    )
+
+    # Without whitelist - should be flagged
+    analysis_without_whitelist = detector.analyze_transaction(suspicious_tx, [])
+    assert analysis_without_whitelist.is_suspicious is True
+    assert analysis_without_whitelist.score > 0
+
+    # With whitelist - should NOT be flagged
+    whitelist = {whitelisted_address}
+    analysis_with_whitelist = detector.analyze_transaction(
+        suspicious_tx, [], whitelisted_addresses=whitelist
+    )
+    assert analysis_with_whitelist.is_suspicious is False
+    assert analysis_with_whitelist.score == 0
+    assert len(analysis_with_whitelist.flags) == 0
+    assert "Whitelisted" in analysis_with_whitelist.recommendation
+
+
+def test_whitelist_with_token_contract(detector, base_timestamp):
+    """Test that transactions to/from token contract addresses are whitelisted."""
+    usdt_contract = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+
+    # Transaction TO token contract (e.g., user sending to USDT contract)
+    tx_to_contract = TransactionMetadata(
+        tx_hash="0x456",
+        from_address="0xUser123",
+        to_address=usdt_contract,  # To whitelisted contract
+        value=Decimal("100"),
+        block_number=19000000,
+        timestamp=base_timestamp,
+        is_new_address=True,
+        contract_age_blocks=1,
+    )
+
+    whitelist = {usdt_contract}
+    analysis = detector.analyze_transaction(tx_to_contract, [], whitelisted_addresses=whitelist)
+    assert analysis.is_suspicious is False
+    assert analysis.score == 0
+
+    # Transaction FROM token contract
+    tx_from_contract = TransactionMetadata(
+        tx_hash="0x789",
+        from_address=usdt_contract,  # From whitelisted contract
+        to_address="0xUser123",
+        value=Decimal("100"),
+        block_number=19000000,
+        timestamp=base_timestamp,
+        is_new_address=True,
+        contract_age_blocks=1,
+    )
+
+    analysis2 = detector.analyze_transaction(tx_from_contract, [], whitelisted_addresses=whitelist)
+    assert analysis2.is_suspicious is False
+    assert analysis2.score == 0
+
+
+def test_whitelist_address_normalization(detector, base_timestamp):
+    """Test that whitelist works with addresses with or without 0x prefix."""
+    address_with_prefix = "0x31390eaf4db4013b3d5d9dbcff494e689589ae83"
+    address_without_prefix = "31390eaf4db4013b3d5d9dbcff494e689589ae83"
+
+    tx = TransactionMetadata(
+        tx_hash="0xabc",
+        from_address=address_with_prefix,
+        to_address="0xRecipient123",
+        value=Decimal("0.01"),
+        block_number=19000000,
+        timestamp=base_timestamp,
+        is_new_address=True,
+        contract_age_blocks=1,
+    )
+
+    # Whitelist with address without prefix - should still work
+    whitelist = {address_without_prefix}
+    analysis = detector.analyze_transaction(tx, [], whitelisted_addresses=whitelist)
+    assert analysis.is_suspicious is False
+
+    # Whitelist with address with prefix - should also work
+    whitelist2 = {address_with_prefix}
+    analysis2 = detector.analyze_transaction(tx, [], whitelisted_addresses=whitelist2)
+    assert analysis2.is_suspicious is False
