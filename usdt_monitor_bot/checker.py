@@ -587,7 +587,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
         if not all_transactions:
@@ -627,7 +627,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
 
@@ -685,7 +685,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
         return (new_last_block, processed_count)
@@ -805,7 +805,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
         # Fetch latest block if not provided (for backward compatibility)
@@ -833,7 +833,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
 
@@ -871,7 +871,7 @@ class TransactionChecker:
                 file=sys.stdout,
                 flush=True,
             )
-        except:
+        except Exception:
             pass
         # #endregion
 
@@ -934,7 +934,7 @@ class TransactionChecker:
                     file=sys.stdout,
                     flush=True,
                 )
-            except:
+            except Exception:
                 pass
             # #endregion
 
@@ -978,7 +978,7 @@ class TransactionChecker:
                     file=sys.stdout,
                     flush=True,
                 )
-            except:
+            except Exception:
                 pass
             # #endregion
 
@@ -1024,7 +1024,7 @@ class TransactionChecker:
                         file=sys.stdout,
                         flush=True,
                     )
-                except:
+                except Exception:
                     pass
                 # #endregion
                 update_tasks.append(
