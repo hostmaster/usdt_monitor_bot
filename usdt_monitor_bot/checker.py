@@ -628,7 +628,7 @@ class TransactionChecker:
         latest_block: Optional[int],
         address_lower: str,
         context: str = "",
-        log_level: str = "debug",
+        log_level: 'Literal["debug", "warning"]' = "debug",
     ) -> int:
         """
         Cap a block number to the latest blockchain block to prevent getting ahead.
