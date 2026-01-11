@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 # Third-party
 import aiohttp
@@ -628,7 +628,7 @@ class TransactionChecker:
         latest_block: Optional[int],
         address_lower: str,
         context: str = "",
-        log_level: 'Literal["debug", "warning"]' = "debug",
+        log_level: Literal["debug", "warning"] = "debug",
     ) -> int:
         """
         Cap a block number to the latest blockchain block to prevent getting ahead.
