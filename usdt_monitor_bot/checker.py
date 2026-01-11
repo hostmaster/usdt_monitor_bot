@@ -7,9 +7,7 @@ and performs spam detection analysis.
 
 # Standard library
 import asyncio
-import json
 import logging
-import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -566,34 +564,18 @@ class TransactionChecker:
         Returns:
             Tuple of (highest_block_number, processed_transaction_count)
         """
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "A",
-                        "location": "checker.py:553",
-                        "message": "_process_address_transactions entry",
-                        "data": {
-                            "address": address_lower,
-                            "start_block": start_block,
-                            "tx_count": len(all_transactions),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
         if not all_transactions:
             # No transactions found - return start_block to indicate we've checked up to this point
             # The caller will update the block number to record the check
-            return (start_block, 0)
+            # Cap start_block to latest_block if available to prevent getting ahead of blockchain
+            final_block = start_block
+            if latest_block is not None and start_block > latest_block:
+                logging.debug(
+                    f"Capping start_block ({start_block}) to latest_block ({latest_block}) "
+                    f"for {address_lower} (no transactions found) to prevent getting ahead of blockchain."
+                )
+                final_block = latest_block
+            return (final_block, 0)
 
         # Always update to the highest block seen to avoid re-scanning
         # But cap it to latest_block if available to prevent getting ahead of blockchain
@@ -605,31 +587,6 @@ class TransactionChecker:
                 f"for {address_lower} to prevent getting ahead of blockchain."
             )
             max_seen_block = latest_block
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "A",
-                        "location": "checker.py:559",
-                        "message": "max_seen_block calculated",
-                        "data": {
-                            "address": address_lower,
-                            "max_seen_block": max_seen_block,
-                            "tx_block_numbers": tx_block_numbers[:10],
-                            "start_block": start_block,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
 
         processing_batch = self._filter_transactions(all_transactions, start_block)
 
@@ -637,7 +594,15 @@ class TransactionChecker:
             logging.debug(
                 f"No transactions to notify for {address_lower} after filtering."
             )
-            return (max(start_block, max_seen_block), 0)
+            # Cap to latest_block if available to prevent getting ahead of blockchain
+            result_block = max(start_block, max_seen_block)
+            if latest_block is not None and result_block > latest_block:
+                logging.debug(
+                    f"Capping result_block ({result_block}) to latest_block ({latest_block}) "
+                    f"for {address_lower} (no transactions after filtering) to prevent getting ahead of blockchain."
+                )
+                result_block = latest_block
+            return (result_block, 0)
 
         user_ids = await self._db.get_users_for_address(address_lower)
         if not user_ids:
@@ -662,32 +627,6 @@ class TransactionChecker:
                 f"for {address_lower} to prevent getting ahead of blockchain."
             )
             new_last_block = latest_block
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "C",
-                        "location": "checker.py:583",
-                        "message": "_process_address_transactions exit",
-                        "data": {
-                            "address": address_lower,
-                            "new_last_block": new_last_block,
-                            "start_block": start_block,
-                            "max_seen_block": max_seen_block,
-                            "processed_count": processed_count,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
         return (new_last_block, processed_count)
 
     def _handle_latest_block_unavailable(
@@ -783,59 +722,9 @@ class TransactionChecker:
         Returns:
             BlockDeterminationResult with final_block_number and resetting_to_latest flag
         """
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "B",
-                        "location": "checker.py:675",
-                        "message": "_determine_next_block entry",
-                        "data": {
-                            "address": address_lower,
-                            "start_block": start_block,
-                            "new_last_block": new_last_block,
-                            "tx_count": len(raw_transactions),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
         # Fetch latest block if not provided (for backward compatibility)
         if latest_block is None:
             latest_block = await self._etherscan.get_latest_block_number()
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "B",
-                        "location": "checker.py:675",
-                        "message": "latest_block fetched",
-                        "data": {
-                            "address": address_lower,
-                            "latest_block": latest_block,
-                            "start_block": start_block,
-                            "new_last_block": new_last_block,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
 
         # Handle case when latest block cannot be retrieved
         if latest_block is None:
@@ -847,33 +736,6 @@ class TransactionChecker:
         final_block, resetting_to_latest = self._sync_block_with_blockchain(
             start_block, new_last_block, latest_block, address_lower
         )
-        # #region agent log
-        try:
-            print(
-                json.dumps(
-                    {
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "D",
-                        "location": "checker.py:684",
-                        "message": "after sync_block_with_blockchain",
-                        "data": {
-                            "address": address_lower,
-                            "final_block": final_block,
-                            "resetting_to_latest": resetting_to_latest,
-                            "start_block": start_block,
-                            "new_last_block": new_last_block,
-                            "latest_block": latest_block,
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }
-                ),
-                file=sys.stdout,
-                flush=True,
-            )
-        except Exception:  # nosec B110
-            pass
-        # #endregion
 
         # If no transactions found and blockchain hasn't advanced, update to latest
         # BUT only if latest_block >= start_block to prevent getting ahead of blockchain
@@ -914,29 +776,6 @@ class TransactionChecker:
         try:
             await asyncio.sleep(self._config.etherscan_request_delay)
             start_block = await self._db.get_last_checked_block(address_lower)
-            # #region agent log
-            try:
-                print(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "D",
-                            "location": "checker.py:722",
-                            "message": "start_block from DB",
-                            "data": {
-                                "address": address_lower,
-                                "start_block": start_block,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    ),
-                    file=sys.stdout,
-                    flush=True,
-                )
-            except Exception:  # nosec B110
-                pass
-            # #endregion
 
             logging.debug(f"Checking {address_lower} from block {start_block + 1}")
 
@@ -951,36 +790,6 @@ class TransactionChecker:
             raw_transactions = await self._fetch_transactions_for_address(
                 address_lower, start_block + 1
             )
-            # #region agent log
-            try:
-                tx_blocks = (
-                    [int(tx.get("blockNumber", 0)) for tx in raw_transactions]
-                    if raw_transactions
-                    else []
-                )
-                print(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "A",
-                            "location": "checker.py:726",
-                            "message": "transactions fetched",
-                            "data": {
-                                "address": address_lower,
-                                "tx_count": len(raw_transactions),
-                                "tx_block_numbers": tx_blocks[:10],
-                                "fetch_from_block": start_block + 1,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    ),
-                    file=sys.stdout,
-                    flush=True,
-                )
-            except Exception:  # nosec B110
-                pass
-            # #endregion
 
             stats["total_transactions_found"] += len(raw_transactions)
             if raw_transactions:
@@ -1001,35 +810,26 @@ class TransactionChecker:
             )
 
             if self._should_update_block(start_block, block_result):
-                self._log_block_update(address_lower, start_block, block_result)
-                # #region agent log
-                try:
-                    print(
-                        json.dumps(
-                            {
-                                "sessionId": "debug-session",
-                                "runId": "run1",
-                                "hypothesisId": "D",
-                                "location": "checker.py:744",
-                                "message": "updating DB block",
-                                "data": {
-                                    "address": address_lower,
-                                    "old_block": start_block,
-                                    "new_block": block_result.final_block_number,
-                                    "resetting": block_result.resetting_to_latest,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        ),
-                        file=sys.stdout,
-                        flush=True,
+                # Final defensive check: ensure we never update database with a value ahead of blockchain
+                # Fetch latest_block one more time right before update to catch any race conditions
+                final_latest_block = await self._etherscan.get_latest_block_number()
+                final_block_to_update = block_result.final_block_number
+                if (
+                    final_latest_block is not None
+                    and final_block_to_update > final_latest_block
+                ):
+                    logging.warning(
+                        f"Defensive check: final_block ({final_block_to_update}) > latest_block ({final_latest_block}) "
+                        f"for {address_lower}. Capping to {final_latest_block} before database update."
                     )
-                except Exception:  # nosec B110
-                    pass
-                # #endregion
+                    final_block_to_update = final_latest_block
+
+                self._log_block_update(
+                    address_lower, start_block, block_result, final_block_to_update
+                )
                 update_tasks.append(
                     self._db.update_last_checked_block(
-                        address_lower, block_result.final_block_number
+                        address_lower, final_block_to_update
                     )
                 )
                 stats["addresses_updated"] += 1
@@ -1061,9 +861,23 @@ class TransactionChecker:
         address_lower: str,
         start_block: int,
         block_result: BlockDeterminationResult,
+        actual_block: Optional[int] = None,
     ) -> None:
-        """Log block update with appropriate level."""
-        new_block = block_result.final_block_number
+        """
+        Log block update with appropriate level.
+
+        Args:
+            address_lower: The monitored address
+            start_block: The starting block number
+            block_result: The block determination result
+            actual_block: Optional actual block number being written (if different from block_result)
+        """
+        # Use actual_block if provided (e.g., after final defensive check), otherwise use result
+        new_block = (
+            actual_block
+            if actual_block is not None
+            else block_result.final_block_number
+        )
         if block_result.resetting_to_latest:
             logging.info(
                 f"Resetting block for {address_lower} from {start_block} to {new_block} to sync with blockchain"
