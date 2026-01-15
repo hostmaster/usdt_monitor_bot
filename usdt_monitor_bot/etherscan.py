@@ -331,9 +331,7 @@ class EtherscanClient:
                     # Check if result is an error message (e.g., rate limit)
                     result_str = str(result)
                     result_lower = result_str.lower()
-                    if "rate limit" in result_lower or (
-                        "rate" in result_lower and "limit" in result_lower
-                    ):
+                    if "rate" in result_lower and "limit" in result_lower:
                         raise EtherscanRateLimitError(
                             f"Rate limit error in response: {result_str}"
                         )
@@ -359,6 +357,14 @@ class EtherscanClient:
                         logging.debug(f"Latest block number fetched: {block_number}")
                         return block_number
                     except (ValueError, TypeError) as e:
+                        # Check if the error is due to a rate limit message in result field
+                        result_str = str(result).lower()
+                        if "rate limit" in result_str or (
+                            "rate" in result_str and "limit" in result_str
+                        ):
+                            raise EtherscanRateLimitError(
+                                f"Rate limit error in response: {result}"
+                            )
                         logging.warning(
                             f"Failed to parse block number: {result_str}. Error: {e}"
                         )
