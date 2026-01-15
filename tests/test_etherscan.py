@@ -447,8 +447,9 @@ async def test_get_latest_block_number_rate_limit_in_result(
         await client.get_latest_block_number()
 
     assert "rate limit" in str(exc_info.value).lower()
+    assert "rate limit" in str(exc_info.value).lower()
     assert "Max calls per sec" in str(exc_info.value)
-
+    assert mock_session_get.call_count == 3  # Verify retry behavior
 
 @pytest.mark.asyncio
 async def test_get_latest_block_number_success(
