@@ -66,13 +66,14 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
-                # Create connector with limits to prevent file descriptor exhaustion
-                # limit: max total connections, limit_per_host: max connections per host
+                # Create connector with strict limits to prevent file descriptor exhaustion
+                # limit: max total connections (reduced from 10 to 3 to prevent FD exhaustion)
+                # limit_per_host: max connections per host (reduced from 5 to 2)
                 # force_close: close connections after each request to prevent accumulation
                 # ttl_dns_cache: DNS cache TTL to prevent stale DNS connections
                 connector = TCPConnector(
-                    limit=10,
-                    limit_per_host=5,
+                    limit=3,  # Reduced from 10 to prevent FD exhaustion
+                    limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
                     force_close=True,  # Close connections after each request
                     ttl_dns_cache=300,  # 5 minutes DNS cache
                 )
@@ -83,8 +84,8 @@ class EtherscanClient:
     async def __aenter__(self):
         """Create a new session when entering the context."""
         connector = TCPConnector(
-            limit=10,
-            limit_per_host=5,
+            limit=3,  # Reduced from 10 to prevent FD exhaustion
+            limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
             force_close=True,
             ttl_dns_cache=300,
         )
@@ -342,25 +343,27 @@ class EtherscanClient:
                 # Get connector before closing session
                 connector = getattr(self._session, "connector", None)
 
+                # Explicitly close idle connections before closing the session
+                # This helps release file descriptors immediately
+                if connector and hasattr(connector, "close"):
+                    try:
+                        # Close idle connections to free up file descriptors
+                        await connector.close()
+                    except Exception as e:
+                        logging.debug(
+                            f"Error closing connector connections (non-critical): {e}"
+                        )
+
                 # Always attempt to close - aiohttp sessions handle already-closed gracefully
                 # For mocks, this ensures close() is called
                 await self._session.close()
 
-                # Explicitly close the connector to ensure all file descriptors are released
-                # The session.close() should close the connector, but we do it explicitly
-                # to be absolutely sure all connections are closed
-                if connector and hasattr(connector, "closed") and not connector.closed:
-                    try:
-                        await connector.close()
-                    except Exception as e:
-                        logging.debug(f"Error closing connector (non-critical): {e}")
-
-                # Wait 0.1 seconds for connections to close gracefully.
+                # Wait 0.2 seconds for connections to close gracefully.
                 # This brief delay allows aiohttp's connection pool to properly release
                 # file descriptors and close underlying TCP connections before the event
                 # loop continues. Without this, connections may not be fully closed when
                 # the session.close() coroutine completes, potentially leading to resource leaks.
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.2)
             except (aiohttp.ClientError, RuntimeError) as e:
                 # If closing fails (e.g., already closed or event loop closed), log and continue
                 logging.debug(
