@@ -38,7 +38,13 @@ class BotConfig:
         etherscan_api_key: str,
         db_path: str = os.path.join(DATA_DIR, "usdt_monitor.db"),
         etherscan_base_url: str = "https://api.etherscan.io/v2/api",
-        etherscan_request_delay: float = 0.2,
+        etherscan_request_delay: float = 0.5,  # Increased default to stay under 3 req/sec limit
+        rate_limiter_min_delay: float = 0.4,  # Minimum delay to stay under 3 req/sec limit
+        rate_limiter_max_delay: float = 10.0,  # Maximum delay for aggressive backoff
+        rate_limiter_backoff_factor: float = 2.5,  # Multiplier when rate limit is hit
+        rate_limiter_recovery_factor: float = 0.95,  # Multiplier when request succeeds
+        rate_limiter_success_threshold: int = 20,  # Consecutive successes before reducing delay
+        rate_limiter_recovery_cooldown: float = 30.0,  # Seconds to wait after rate limit before reducing
         check_interval_seconds: int = 60,
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
@@ -60,6 +66,14 @@ class BotConfig:
         # Etherscan API Settings
         self.etherscan_base_url = etherscan_base_url
         self.etherscan_request_delay = etherscan_request_delay
+
+        # Rate limiter settings
+        self.rate_limiter_min_delay = rate_limiter_min_delay
+        self.rate_limiter_max_delay = rate_limiter_max_delay
+        self.rate_limiter_backoff_factor = rate_limiter_backoff_factor
+        self.rate_limiter_recovery_factor = rate_limiter_recovery_factor
+        self.rate_limiter_success_threshold = rate_limiter_success_threshold
+        self.rate_limiter_recovery_cooldown = rate_limiter_recovery_cooldown
 
         # Check interval settings
         self.check_interval_seconds = check_interval_seconds
@@ -155,7 +169,7 @@ def load_config() -> BotConfig:
             f"ETHERSCAN_BASE_URL: Using default value ('{etherscan_base_url}')."
         )
 
-    default_etherscan_request_delay = 0.2
+    default_etherscan_request_delay = 0.5  # Increased to stay under 3 req/sec limit
     etherscan_request_delay_env = os.getenv("ETHERSCAN_REQUEST_DELAY")
     if etherscan_request_delay_env:
         try:
@@ -172,6 +186,121 @@ def load_config() -> BotConfig:
         etherscan_request_delay = default_etherscan_request_delay
         logging.info(
             f"ETHERSCAN_REQUEST_DELAY: Using default value ({etherscan_request_delay})."
+        )
+
+    # Rate limiter configuration
+    default_rate_limiter_min_delay = 0.4
+    rate_limiter_min_delay_env = os.getenv("RATE_LIMITER_MIN_DELAY")
+    if rate_limiter_min_delay_env:
+        try:
+            rate_limiter_min_delay = float(rate_limiter_min_delay_env)
+            logging.info(
+                f"RATE_LIMITER_MIN_DELAY: Loaded from environment (value: {rate_limiter_min_delay})."
+            )
+        except ValueError:
+            rate_limiter_min_delay = default_rate_limiter_min_delay
+            logging.warning(
+                f"RATE_LIMITER_MIN_DELAY: Invalid value '{rate_limiter_min_delay_env}' from environment. Using default value ({rate_limiter_min_delay})."
+            )
+    else:
+        rate_limiter_min_delay = default_rate_limiter_min_delay
+        logging.info(
+            f"RATE_LIMITER_MIN_DELAY: Using default value ({rate_limiter_min_delay})."
+        )
+
+    default_rate_limiter_max_delay = 10.0
+    rate_limiter_max_delay_env = os.getenv("RATE_LIMITER_MAX_DELAY")
+    if rate_limiter_max_delay_env:
+        try:
+            rate_limiter_max_delay = float(rate_limiter_max_delay_env)
+            logging.info(
+                f"RATE_LIMITER_MAX_DELAY: Loaded from environment (value: {rate_limiter_max_delay})."
+            )
+        except ValueError:
+            rate_limiter_max_delay = default_rate_limiter_max_delay
+            logging.warning(
+                f"RATE_LIMITER_MAX_DELAY: Invalid value '{rate_limiter_max_delay_env}' from environment. Using default value ({rate_limiter_max_delay})."
+            )
+    else:
+        rate_limiter_max_delay = default_rate_limiter_max_delay
+        logging.info(
+            f"RATE_LIMITER_MAX_DELAY: Using default value ({rate_limiter_max_delay})."
+        )
+
+    default_rate_limiter_backoff_factor = 2.5
+    rate_limiter_backoff_factor_env = os.getenv("RATE_LIMITER_BACKOFF_FACTOR")
+    if rate_limiter_backoff_factor_env:
+        try:
+            rate_limiter_backoff_factor = float(rate_limiter_backoff_factor_env)
+            logging.info(
+                f"RATE_LIMITER_BACKOFF_FACTOR: Loaded from environment (value: {rate_limiter_backoff_factor})."
+            )
+        except ValueError:
+            rate_limiter_backoff_factor = default_rate_limiter_backoff_factor
+            logging.warning(
+                f"RATE_LIMITER_BACKOFF_FACTOR: Invalid value '{rate_limiter_backoff_factor_env}' from environment. Using default value ({rate_limiter_backoff_factor})."
+            )
+    else:
+        rate_limiter_backoff_factor = default_rate_limiter_backoff_factor
+        logging.info(
+            f"RATE_LIMITER_BACKOFF_FACTOR: Using default value ({rate_limiter_backoff_factor})."
+        )
+
+    default_rate_limiter_recovery_factor = 0.95
+    rate_limiter_recovery_factor_env = os.getenv("RATE_LIMITER_RECOVERY_FACTOR")
+    if rate_limiter_recovery_factor_env:
+        try:
+            rate_limiter_recovery_factor = float(rate_limiter_recovery_factor_env)
+            logging.info(
+                f"RATE_LIMITER_RECOVERY_FACTOR: Loaded from environment (value: {rate_limiter_recovery_factor})."
+            )
+        except ValueError:
+            rate_limiter_recovery_factor = default_rate_limiter_recovery_factor
+            logging.warning(
+                f"RATE_LIMITER_RECOVERY_FACTOR: Invalid value '{rate_limiter_recovery_factor_env}' from environment. Using default value ({rate_limiter_recovery_factor})."
+            )
+    else:
+        rate_limiter_recovery_factor = default_rate_limiter_recovery_factor
+        logging.info(
+            f"RATE_LIMITER_RECOVERY_FACTOR: Using default value ({rate_limiter_recovery_factor})."
+        )
+
+    default_rate_limiter_success_threshold = 20
+    rate_limiter_success_threshold_env = os.getenv("RATE_LIMITER_SUCCESS_THRESHOLD")
+    if rate_limiter_success_threshold_env:
+        try:
+            rate_limiter_success_threshold = int(rate_limiter_success_threshold_env)
+            logging.info(
+                f"RATE_LIMITER_SUCCESS_THRESHOLD: Loaded from environment (value: {rate_limiter_success_threshold})."
+            )
+        except ValueError:
+            rate_limiter_success_threshold = default_rate_limiter_success_threshold
+            logging.warning(
+                f"RATE_LIMITER_SUCCESS_THRESHOLD: Invalid value '{rate_limiter_success_threshold_env}' from environment. Using default value ({rate_limiter_success_threshold})."
+            )
+    else:
+        rate_limiter_success_threshold = default_rate_limiter_success_threshold
+        logging.info(
+            f"RATE_LIMITER_SUCCESS_THRESHOLD: Using default value ({rate_limiter_success_threshold})."
+        )
+
+    default_rate_limiter_recovery_cooldown = 30.0
+    rate_limiter_recovery_cooldown_env = os.getenv("RATE_LIMITER_RECOVERY_COOLDOWN")
+    if rate_limiter_recovery_cooldown_env:
+        try:
+            rate_limiter_recovery_cooldown = float(rate_limiter_recovery_cooldown_env)
+            logging.info(
+                f"RATE_LIMITER_RECOVERY_COOLDOWN: Loaded from environment (value: {rate_limiter_recovery_cooldown})."
+            )
+        except ValueError:
+            rate_limiter_recovery_cooldown = default_rate_limiter_recovery_cooldown
+            logging.warning(
+                f"RATE_LIMITER_RECOVERY_COOLDOWN: Invalid value '{rate_limiter_recovery_cooldown_env}' from environment. Using default value ({rate_limiter_recovery_cooldown})."
+            )
+    else:
+        rate_limiter_recovery_cooldown = default_rate_limiter_recovery_cooldown
+        logging.info(
+            f"RATE_LIMITER_RECOVERY_COOLDOWN: Using default value ({rate_limiter_recovery_cooldown})."
         )
 
     default_check_interval_seconds = 60
@@ -247,6 +376,12 @@ def load_config() -> BotConfig:
         db_path=db_path,
         etherscan_base_url=etherscan_base_url,
         etherscan_request_delay=etherscan_request_delay,
+        rate_limiter_min_delay=rate_limiter_min_delay,
+        rate_limiter_max_delay=rate_limiter_max_delay,
+        rate_limiter_backoff_factor=rate_limiter_backoff_factor,
+        rate_limiter_recovery_factor=rate_limiter_recovery_factor,
+        rate_limiter_success_threshold=rate_limiter_success_threshold,
+        rate_limiter_recovery_cooldown=rate_limiter_recovery_cooldown,
         check_interval_seconds=check_interval_seconds,
         max_transaction_age_days=max_transaction_age_days,
         max_transactions_per_check=max_transactions_per_check,
