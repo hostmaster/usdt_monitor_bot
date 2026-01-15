@@ -431,7 +431,6 @@ async def test_get_latest_block_number_rate_limit_in_result(
 ):
     """Test that rate limit error messages in result field are properly detected."""
     client = etherscan_client_with_mocked_session
-    mock_session_get = mock_aiohttp_session.get
 
     # Simulate Etherscan returning rate limit error in result field instead of hex block number
     mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
