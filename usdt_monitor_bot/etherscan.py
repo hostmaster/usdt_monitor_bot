@@ -51,6 +51,33 @@ class EtherscanClient:
         )  # Protect session creation from race conditions
         logging.debug("EtherscanClient initialized.")
 
+    def _create_connector(self) -> TCPConnector:
+        """Create a TCPConnector with configured limits to prevent file descriptor exhaustion.
+        
+        Returns:
+            A configured TCPConnector instance.
+        """
+        # Create connector with strict limits to prevent file descriptor exhaustion
+        # limit: max total connections (reduced from 10 to 3 to prevent FD exhaustion)
+        # limit_per_host: max connections per host (reduced from 5 to 2)
+        # force_close: close connections after each request to prevent accumulation
+        # ttl_dns_cache: DNS cache TTL to prevent stale DNS connections
+        return TCPConnector(
+            limit=3,  # Reduced from 10 to prevent FD exhaustion
+            limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
+            force_close=True,  # Close connections after each request
+            ttl_dns_cache=300,  # 5 minutes DNS cache
+        )
+
+    def _create_session(self) -> aiohttp.ClientSession:
+        """Create a ClientSession with configured timeout and connector.
+        
+        Returns:
+            A configured ClientSession instance.
+        """
+        connector = self._create_connector()
+        return aiohttp.ClientSession(timeout=self._timeout, connector=connector)
+
     async def _ensure_session(self):
         """Ensure a session exists, creating one if necessary.
 
@@ -66,32 +93,11 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
-                # Create connector with strict limits to prevent file descriptor exhaustion
-                # limit: max total connections (reduced from 10 to 3 to prevent FD exhaustion)
-                # limit_per_host: max connections per host (reduced from 5 to 2)
-                # force_close: close connections after each request to prevent accumulation
-                # ttl_dns_cache: DNS cache TTL to prevent stale DNS connections
-                connector = TCPConnector(
-                    limit=3,  # Reduced from 10 to prevent FD exhaustion
-                    limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
-                    force_close=True,  # Close connections after each request
-                    ttl_dns_cache=300,  # 5 minutes DNS cache
-                )
-                self._session = aiohttp.ClientSession(
-                    timeout=self._timeout, connector=connector
-                )
+                self._session = self._create_session()
 
     async def __aenter__(self):
         """Create a new session when entering the context."""
-        connector = TCPConnector(
-            limit=3,  # Reduced from 10 to prevent FD exhaustion
-            limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
-            force_close=True,
-            ttl_dns_cache=300,
-        )
-        self._session = aiohttp.ClientSession(
-            timeout=self._timeout, connector=connector
-        )
+        self._session = self._create_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
