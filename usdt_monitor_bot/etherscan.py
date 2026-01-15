@@ -143,11 +143,12 @@ class EtherscanClient:
         initial_delay = max(config.etherscan_request_delay, 0.5)
         self._rate_limiter = AdaptiveRateLimiter(
             initial_delay=initial_delay,
-            min_delay=0.4,  # Minimum 0.4s to stay under 3 req/sec limit
-            max_delay=10.0,  # Increased max delay for more aggressive backoff
-            backoff_factor=2.5,  # More aggressive backoff
-            recovery_factor=0.95,  # Slower recovery to maintain stability
-            success_threshold=20,  # More successes needed before reducing delay
+            min_delay=config.rate_limiter_min_delay,
+            max_delay=config.rate_limiter_max_delay,
+            backoff_factor=config.rate_limiter_backoff_factor,
+            recovery_factor=config.rate_limiter_recovery_factor,
+            success_threshold=config.rate_limiter_success_threshold,
+            recovery_cooldown=config.rate_limiter_recovery_cooldown,
         )
         logging.debug("EtherscanClient initialized.")
 

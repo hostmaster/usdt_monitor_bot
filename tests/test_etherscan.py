@@ -37,6 +37,12 @@ def mock_config():
     config.telegram_bot_token = "test_bot_token"
     config.db_path = "test.db"
     config.etherscan_request_delay = 0.2
+    config.rate_limiter_min_delay = 0.4
+    config.rate_limiter_max_delay = 10.0
+    config.rate_limiter_backoff_factor = 2.5
+    config.rate_limiter_recovery_factor = 0.95
+    config.rate_limiter_success_threshold = 20
+    config.rate_limiter_recovery_cooldown = 30.0
     config.check_interval_seconds = 60
     return config
 
