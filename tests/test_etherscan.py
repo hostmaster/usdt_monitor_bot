@@ -445,6 +445,44 @@ async def test_get_latest_block_number_rate_limit_in_result(
 
 
 @pytest.mark.asyncio
+async def test_get_latest_block_number_success(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Test successful latest block number retrieval."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={"result": "0x123456"}  # Hex block number
+    )
+
+    result = await client.get_latest_block_number()
+    assert result == 0x123456
+    assert mock_session_get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_latest_block_number_invalid_hex(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Test handling of invalid hex format in result."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={"result": "not a hex number"}  # Invalid format
+    )
+
+    result = await client.get_latest_block_number()
+    assert result is None
+    assert mock_session_get.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_client_session_cleanup(mock_config, mock_aiohttp_session, monkeypatch):
     """Test that the client session is properly cleaned up."""
     # Patch aiohttp.ClientSession globally for this test to ensure our mock is used
