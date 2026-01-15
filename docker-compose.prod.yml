@@ -1,6 +1,7 @@
 services:
   telegram-bot:
     image: ghcr.io/hostmaster/usdt_monitor_bot:stable
+    build: .
     env_file: [.env]
     volumes:
       - usdt_monitor_data:/app/data
