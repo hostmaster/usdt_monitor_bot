@@ -38,7 +38,7 @@ class BotConfig:
         etherscan_api_key: str,
         db_path: str = os.path.join(DATA_DIR, "usdt_monitor.db"),
         etherscan_base_url: str = "https://api.etherscan.io/v2/api",
-        etherscan_request_delay: float = 0.2,
+        etherscan_request_delay: float = 0.5,  # Increased default to stay under 3 req/sec limit
         check_interval_seconds: int = 60,
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
@@ -155,7 +155,7 @@ def load_config() -> BotConfig:
             f"ETHERSCAN_BASE_URL: Using default value ('{etherscan_base_url}')."
         )
 
-    default_etherscan_request_delay = 0.2
+    default_etherscan_request_delay = 0.5  # Increased to stay under 3 req/sec limit
     etherscan_request_delay_env = os.getenv("ETHERSCAN_REQUEST_DELAY")
     if etherscan_request_delay_env:
         try:
