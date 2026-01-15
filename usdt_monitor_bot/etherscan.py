@@ -224,8 +224,7 @@ class EtherscanClient:
             self._rate_limiter.on_success()
             return result
         except EtherscanRateLimitError:
-            # Rate limiter will be adapted in the retry decorator's before_sleep
-            # But we also adapt it here to be safe
+            # Adapt rate limiter when rate limit error is encountered
             self._rate_limiter.on_rate_limit()
             raise
 
@@ -272,15 +271,10 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
 
-        # Wait for rate limiter before making request
-        await self._rate_limiter.wait()
-
-        # The @retry decorator will handle ClientError and TimeoutError.
-        # We only need to catch other exceptions like JSON decoding errors.
-        try:
+        async def _make_request():
+            """Inner function to make the actual request."""
             async with self._session.get(self._base_url, params=params) as response:
                 if response.status == 429:  # Too Many Requests
-                    self._rate_limiter.on_rate_limit()
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
@@ -298,7 +292,6 @@ class EtherscanClient:
 
                     # Explicitly check for rate limit messages in the response body
                     if "rate limit" in message.lower():
-                        self._rate_limiter.on_rate_limit()
                         raise EtherscanRateLimitError(message)
 
                     # Handle common "NOTOK" cases with more context
@@ -318,10 +311,12 @@ class EtherscanClient:
                     # For other API-level errors (e.g., "Invalid API Key"), raise a generic EtherscanError.
                     raise EtherscanError(error_details)
 
-                # Request succeeded - update rate limiter
-                self._rate_limiter.on_success()
                 return data.get("result", [])
 
+        # The @retry decorator will handle ClientError and TimeoutError.
+        # We only need to catch other exceptions like JSON decoding errors.
+        try:
+            return await self._make_request_with_rate_limiting(_make_request)
         except ValueError as e:  # Catches JSON decoding errors
             raise EtherscanError(f"Invalid JSON response: {e}") from e
 
@@ -358,17 +353,11 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
 
-        # Wait for rate limiter before making request
-        await self._rate_limiter.wait()
-
-        try:
+        async def _make_request():
+            """Inner function to make the actual request."""
             async with self._session.get(self._base_url, params=params) as response:
                 if response.status == 429:
-                    self._rate_limiter.on_rate_limit()
-                    logging.warning(
-                        f"Rate limited while fetching contract creation for {contract_address}"
-                    )
-                    return None
+                    raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
                     logging.warning(
@@ -392,15 +381,25 @@ class EtherscanClient:
 
                 if block_number:
                     try:
-                        result = int(block_number)
-                        # Request succeeded - update rate limiter
-                        self._rate_limiter.on_success()
-                        return result
+                        return int(block_number)
                     except (ValueError, TypeError):
                         logging.warning(f"Invalid block number format: {block_number}")
                         return None
 
                 return None
+
+        try:
+            return await self._make_request_with_rate_limiting(_make_request)
+        except EtherscanRateLimitError:
+            logging.warning(
+                f"Rate limited while fetching contract creation for {contract_address}"
+            )
+            return None
+        except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logging.warning(
+                f"Error fetching contract creation block for {contract_address}: {e}"
+            )
+            return None
 
         except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
             logging.warning(
@@ -433,15 +432,11 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
 
-        # Wait for rate limiter before making request
-        await self._rate_limiter.wait()
-
-        try:
+        async def _make_request():
+            """Inner function to make the actual request."""
             async with self._session.get(self._base_url, params=params) as response:
                 if response.status == 429:
-                    self._rate_limiter.on_rate_limit()
-                    logging.warning("Rate limited while fetching latest block number")
-                    return None
+                    raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
                     logging.warning(
@@ -494,8 +489,6 @@ class EtherscanClient:
                         # Convert hex string to int (e.g., "0x1234" -> 4660)
                         block_number = int(result, 16)
                         logging.debug(f"Latest block number fetched: {block_number}")
-                        # Request succeeded - update rate limiter
-                        self._rate_limiter.on_success()
                         return block_number
                     except (ValueError, TypeError) as e:
                         # Check if the error is due to a rate limit message in result field
@@ -503,7 +496,6 @@ class EtherscanClient:
                         if "rate limit" in result_str or (
                             "rate" in result_str and "limit" in result_str
                         ):
-                            self._rate_limiter.on_rate_limit()
                             raise EtherscanRateLimitError(
                                 f"Rate limit error in response: {result}"
                             )
@@ -515,9 +507,14 @@ class EtherscanClient:
                 logging.warning("Latest block number API returned empty result")
                 return None
 
+        try:
+            return await self._make_request_with_rate_limiting(_make_request)
         except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
             logging.warning(f"Error fetching latest block number: {e}")
             return None
+        # EtherscanRateLimitError is handled by @retry decorator
+        # If all retries fail, it will be reraised (reraise=True)
+        # We don't catch it here to allow retry mechanism to work
 
     async def close(self):
         """Close the session and its connector if they exist."""
