@@ -328,6 +328,31 @@ class EtherscanClient:
                 # Check for result in JSON-RPC format
                 result = data.get("result", "")
                 if result:
+                    # Check if result is an error message (e.g., rate limit)
+                    result_str = str(result)
+                    result_lower = result_str.lower()
+                    if "rate limit" in result_lower or (
+                        "rate" in result_lower and "limit" in result_lower
+                    ):
+                        raise EtherscanRateLimitError(
+                            f"Rate limit error in response: {result_str}"
+                        )
+
+                    # Validate that result is a hex string (starts with "0x" and contains valid hex)
+                    if not isinstance(result, str) or not result.startswith("0x"):
+                        logging.warning(
+                            f"Invalid block number format (not hex): {result_str}"
+                        )
+                        return None
+
+                    # Validate hex string contains only valid hex characters
+                    hex_part = result[2:]  # Remove "0x" prefix
+                    if not hex_part or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                        logging.warning(
+                            f"Invalid block number format (invalid hex): {result_str}"
+                        )
+                        return None
+
                     try:
                         # Convert hex string to int (e.g., "0x1234" -> 4660)
                         block_number = int(result, 16)
@@ -335,7 +360,7 @@ class EtherscanClient:
                         return block_number
                     except (ValueError, TypeError) as e:
                         logging.warning(
-                            f"Invalid block number format: {result}. Error: {e}"
+                            f"Failed to parse block number: {result_str}. Error: {e}"
                         )
                         return None
 
