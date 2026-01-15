@@ -40,6 +40,11 @@ class EtherscanRateLimitError(EtherscanError):
 class EtherscanClient:
     """Client for interacting with the Etherscan API."""
 
+    # TCPConnector configuration constants
+    MAX_TOTAL_CONNECTIONS = 3  # Maximum total connections (reduced from 10 to prevent FD exhaustion)
+    MAX_CONNECTIONS_PER_HOST = 2  # Maximum connections per host (reduced from 5 to prevent FD exhaustion)
+    DNS_CACHE_TTL_SECONDS = 300  # DNS cache TTL in seconds (5 minutes)
+
     def __init__(self, config: BotConfig):
         self._config = config
         self._base_url = config.etherscan_base_url
@@ -61,14 +66,11 @@ class EtherscanClient:
             A configured TCPConnector instance.
         """
         # Create connector with strict limits to prevent file descriptor exhaustion
-        # limit: max total connections (reduced from 10 to 3 to prevent FD exhaustion)
-        # limit_per_host: max connections per host (reduced from 5 to 2)
         # Connection pooling is enabled by default (force_close=False) for better performance
-        # ttl_dns_cache: DNS cache TTL to prevent stale DNS connections
         return TCPConnector(
-            limit=3,  # Reduced from 10 to prevent FD exhaustion
-            limit_per_host=2,  # Reduced from 5 to prevent FD exhaustion
-            ttl_dns_cache=300,  # 5 minutes DNS cache
+            limit=self.MAX_TOTAL_CONNECTIONS,
+            limit_per_host=self.MAX_CONNECTIONS_PER_HOST,
+            ttl_dns_cache=self.DNS_CACHE_TTL_SECONDS,
         )
 
     def _create_session(self) -> aiohttp.ClientSession:
