@@ -53,6 +53,7 @@ class AdaptiveRateLimiter:
         backoff_factor: float = 2.0,
         recovery_factor: float = 0.9,
         success_threshold: int = 10,
+        recovery_cooldown: float = 30.0,
     ):
         """
         Args:
@@ -62,6 +63,7 @@ class AdaptiveRateLimiter:
             backoff_factor: Multiplier when rate limit is hit (e.g., 2.0 = double the delay)
             recovery_factor: Multiplier when request succeeds (e.g., 0.9 = reduce by 10%)
             success_threshold: Number of consecutive successes before reducing delay
+            recovery_cooldown: Seconds to wait after rate limit before reducing delay
         """
         self._current_delay = initial_delay
         self._min_delay = min_delay
@@ -69,6 +71,7 @@ class AdaptiveRateLimiter:
         self._backoff_factor = backoff_factor
         self._recovery_factor = recovery_factor
         self._success_threshold = success_threshold
+        self._recovery_cooldown = recovery_cooldown
         self._consecutive_successes = 0
         self._last_rate_limit_time = 0.0
 
@@ -94,7 +97,7 @@ class AdaptiveRateLimiter:
         time_since_rate_limit = time.time() - self._last_rate_limit_time
         if (
             self._consecutive_successes >= self._success_threshold
-            and time_since_rate_limit > 30  # Wait 30s after rate limit before reducing
+            and time_since_rate_limit > self._recovery_cooldown
         ):
             new_delay = max(
                 self._current_delay * self._recovery_factor, self._min_delay
