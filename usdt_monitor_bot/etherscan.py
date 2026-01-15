@@ -334,6 +334,14 @@ class EtherscanClient:
                         logging.debug(f"Latest block number fetched: {block_number}")
                         return block_number
                     except (ValueError, TypeError) as e:
+                        # Check if the error is due to a rate limit message in result field
+                        result_str = str(result).lower()
+                        if "rate limit" in result_str or (
+                            "rate" in result_str and "limit" in result_str
+                        ):
+                            raise EtherscanRateLimitError(
+                                f"Rate limit error in response: {result}"
+                            )
                         logging.warning(
                             f"Invalid block number format: {result}. Error: {e}"
                         )

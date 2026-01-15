@@ -426,6 +426,25 @@ async def test_retry_success_on_client_error(
 
 
 @pytest.mark.asyncio
+async def test_get_latest_block_number_rate_limit_in_result(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Test that rate limit error messages in result field raise EtherscanRateLimitError."""
+    client = etherscan_client_with_mocked_session
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={"result": "Max calls per sec rate limit reached (3/sec)"}
+    )
+
+    with pytest.raises(EtherscanRateLimitError) as exc_info:
+        await client.get_latest_block_number()
+
+    assert "rate limit" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
 async def test_client_session_cleanup(mock_config, mock_aiohttp_session, monkeypatch):
     """Test that the client session is properly cleaned up."""
     # Patch aiohttp.ClientSession globally for this test to ensure our mock is used
