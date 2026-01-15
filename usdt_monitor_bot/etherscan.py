@@ -331,9 +331,7 @@ class EtherscanClient:
                     # Check if result is an error message (e.g., rate limit)
                     result_str = str(result)
                     result_lower = result_str.lower()
-                    if "rate limit" in result_lower or (
-                        "rate" in result_lower and "limit" in result_lower
-                    ):
+                    if "rate" in result_lower and "limit" in result_lower:
                         raise EtherscanRateLimitError(
                             f"Rate limit error in response: {result_str}"
                         )
