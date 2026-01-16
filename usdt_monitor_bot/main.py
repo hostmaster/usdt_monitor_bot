@@ -110,7 +110,8 @@ async def main() -> None:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:103","message":"Before closing resources","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         await etherscan_client.close()
         # #region agent log
@@ -120,7 +121,8 @@ async def main() -> None:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:105","message":"After etherscan_client.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         await bot.session.close()
         # #region agent log
@@ -130,7 +132,8 @@ async def main() -> None:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:106","message":"After bot.session.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         logging.info("Scheduler shut down. Bot session closed. Exiting.")
 

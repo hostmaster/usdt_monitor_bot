@@ -168,7 +168,8 @@ class EtherscanClient:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"etherscan.py:155","message":"Creating connector","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         # Create connector with strict limits to prevent file descriptor exhaustion
         # Connection pooling is enabled by default (force_close=False) for better performance
@@ -183,7 +184,8 @@ class EtherscanClient:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"etherscan.py:172","message":"Connector created","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         return connector
 
@@ -208,7 +210,8 @@ class EtherscanClient:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:181","message":"_ensure_session entry","data":{"fd_count":fd_count,"has_session":self._session is not None,"session_closed":getattr(self._session, "closed", True) if self._session else None},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         # Check if session exists outside the lock for better performance
         if self._session and not getattr(self._session, "closed", True):
@@ -226,7 +229,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:196","message":"Creating new session","data":{"old_session_exists":old_session is not None,"old_connector_exists":old_connector is not None},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
                 # CRITICAL FIX: Close old session and connector before creating new one
                 if self._session:
@@ -240,7 +244,8 @@ class EtherscanClient:
                             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:203","message":"Closed old session before creating new","data":{},"timestamp":int(time.time()*1000)}) + '\n')
-                        except: pass
+                        except Exception:
+                            pass
                         # #endregion
                     except Exception as e:
                         # #region agent log
@@ -248,7 +253,8 @@ class EtherscanClient:
                             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:210","message":"Error closing old session","data":{"error":str(e)},"timestamp":int(time.time()*1000)}) + '\n')
-                        except: pass
+                        except Exception:
+                            pass
                         # #endregion
                         logging.debug(f"Error closing old session before creating new (non-critical): {e}")
                 self._session = self._create_session()
@@ -258,7 +264,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:217","message":"New session created","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
 
     async def __aenter__(self):
@@ -349,7 +356,8 @@ class EtherscanClient:
                 with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                     import json
                     f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:280","message":"Before HTTP request","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-            except: pass
+            except Exception:
+                pass
             # #endregion
             async with self._session.get(self._base_url, params=params) as response:
                 # #region agent log
@@ -358,7 +366,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:282","message":"HTTP response context entered","data":{"fd_count":fd_count,"status":response.status},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
                 if response.status == 429:  # Too Many Requests
                     raise EtherscanRateLimitError("Rate limit exceeded")
@@ -376,7 +385,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:295","message":"After response.json()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
 
                 # Etherscan API returns status '0' for errors, '1' for success.
@@ -621,7 +631,8 @@ class EtherscanClient:
             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:524","message":"close() called","data":{"fd_count":fd_count,"has_session":self._session is not None},"timestamp":int(time.time()*1000)}) + '\n')
-        except: pass
+        except Exception:
+            pass
         # #endregion
         if self._session:
             try:
@@ -640,7 +651,8 @@ class EtherscanClient:
                             with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:535","message":"Connector closed","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-                        except: pass
+                        except Exception:
+                            pass
                         # #endregion
                     except Exception as e:
                         logging.debug(
@@ -656,7 +668,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:543","message":"Session closed","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
 
                 # Wait 0.2 seconds for connections to close gracefully.
@@ -671,7 +684,8 @@ class EtherscanClient:
                     with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:550","message":"After sleep, close complete","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
-                except: pass
+                except Exception:
+                    pass
                 # #endregion
             except (aiohttp.ClientError, RuntimeError) as e:
                 # If closing fails (e.g., already closed or event loop closed), log and continue
