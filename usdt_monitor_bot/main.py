@@ -33,7 +33,7 @@ _DEBUG_LOG_PATH = None
 
 def _get_debug_log_path() -> str:
     """Get the debug log file path, creating it if necessary.
-    
+
     Works in both local development and container environments.
     In containers, uses /app/data/.cursor/debug.log (writable data directory).
     In local dev, finds workspace root by looking for .cursor or pyproject.toml.
@@ -41,9 +41,11 @@ def _get_debug_log_path() -> str:
     global _DEBUG_LOG_PATH
     if _DEBUG_LOG_PATH is None:
         current = Path.cwd()
-        
+
         # Check if we're in a container (working directory is /app)
-        if str(current) == "/app" or (len(current.parts) > 0 and current.parts[-1] == "app"):
+        if str(current) == "/app" or (
+            len(current.parts) > 0 and current.parts[-1] == "app"
+        ):
             # Container environment: use /app/data/.cursor/debug.log (writable data dir)
             _DEBUG_LOG_PATH = "/app/data/.cursor/debug.log"
             try:
@@ -55,7 +57,9 @@ def _get_debug_log_path() -> str:
         else:
             # Local development: try to find workspace root
             for parent in [current] + list(current.parents):
-                if (parent / ".cursor").exists() or (parent / "pyproject.toml").exists():
+                if (parent / ".cursor").exists() or (
+                    parent / "pyproject.toml"
+                ).exists():
                     _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
                     # Ensure .cursor directory exists
                     (parent / ".cursor").mkdir(exist_ok=True)
@@ -146,30 +150,84 @@ async def main() -> None:
         scheduler.shutdown(wait=True)  # Wait for running jobs to complete
         # #region agent log
         try:
-            fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open(_get_debug_log_path(), 'a') as f:
+            fd_count = (
+                len(os.listdir("/proc/self/fd"))
+                if os.path.exists("/proc/self/fd")
+                else -1
+            )
+            with open(_get_debug_log_path(), "a") as f:
                 import json
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:103","message":"Before closing resources","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
+
+                f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "debug-session",
+                            "runId": "run1",
+                            "hypothesisId": "D",
+                            "location": "main.py:103",
+                            "message": "Before closing resources",
+                            "data": {"fd_count": fd_count},
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
         except Exception:
             pass
         # #endregion
         await etherscan_client.close()
         # #region agent log
         try:
-            fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open(_get_debug_log_path(), 'a') as f:
+            fd_count = (
+                len(os.listdir("/proc/self/fd"))
+                if os.path.exists("/proc/self/fd")
+                else -1
+            )
+            with open(_get_debug_log_path(), "a") as f:
                 import json
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:105","message":"After etherscan_client.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
+
+                f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "debug-session",
+                            "runId": "run1",
+                            "hypothesisId": "D",
+                            "location": "main.py:105",
+                            "message": "After etherscan_client.close()",
+                            "data": {"fd_count": fd_count},
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
         except Exception:
             pass
         # #endregion
         await bot.session.close()
         # #region agent log
         try:
-            fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open(_get_debug_log_path(), 'a') as f:
+            fd_count = (
+                len(os.listdir("/proc/self/fd"))
+                if os.path.exists("/proc/self/fd")
+                else -1
+            )
+            with open(_get_debug_log_path(), "a") as f:
                 import json
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:106","message":"After bot.session.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
+
+                f.write(
+                    json.dumps(
+                        {
+                            "sessionId": "debug-session",
+                            "runId": "run1",
+                            "hypothesisId": "D",
+                            "location": "main.py:106",
+                            "message": "After bot.session.close()",
+                            "data": {"fd_count": fd_count},
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
         except Exception:
             pass
         # #endregion
