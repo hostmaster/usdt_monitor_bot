@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import time
+from pathlib import Path
 from typing import List, Optional
 
 # Third-party
@@ -25,6 +26,28 @@ from tenacity import (
 
 # Local
 from usdt_monitor_bot.config import BotConfig
+
+# Debug log path - works in both local and container environments
+_DEBUG_LOG_PATH = None
+
+
+def _get_debug_log_path() -> str:
+    """Get the debug log file path, creating it if necessary."""
+    global _DEBUG_LOG_PATH
+    if _DEBUG_LOG_PATH is None:
+        # Try to find workspace root by looking for .cursor directory or pyproject.toml
+        current = Path.cwd()
+        for parent in [current] + list(current.parents):
+            if (parent / ".cursor").exists() or (parent / "pyproject.toml").exists():
+                _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
+                # Ensure .cursor directory exists
+                (parent / ".cursor").mkdir(exist_ok=True)
+                break
+        else:
+            # Fallback: use current directory
+            _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
+            Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+    return _DEBUG_LOG_PATH
 
 
 class EtherscanError(Exception):
@@ -165,7 +188,7 @@ class EtherscanClient:
         # #region agent log
         try:
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"etherscan.py:155","message":"Creating connector","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -181,7 +204,7 @@ class EtherscanClient:
         # #region agent log
         try:
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"etherscan.py:172","message":"Connector created","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -207,7 +230,7 @@ class EtherscanClient:
         # #region agent log
         try:
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:181","message":"_ensure_session entry","data":{"fd_count":fd_count,"has_session":self._session is not None,"session_closed":getattr(self._session, "closed", True) if self._session else None},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -226,7 +249,7 @@ class EtherscanClient:
                 try:
                     old_session = self._session
                     old_connector = getattr(old_session, "connector", None) if old_session else None
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:196","message":"Creating new session","data":{"old_session_exists":old_session is not None,"old_connector_exists":old_connector is not None},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:
@@ -241,7 +264,7 @@ class EtherscanClient:
                         await self._session.close()
                         # #region agent log
                         try:
-                            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                            with open(_get_debug_log_path(), 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:203","message":"Closed old session before creating new","data":{},"timestamp":int(time.time()*1000)}) + '\n')
                         except Exception:
@@ -250,7 +273,7 @@ class EtherscanClient:
                     except Exception as e:
                         # #region agent log
                         try:
-                            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                            with open(_get_debug_log_path(), 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:210","message":"Error closing old session","data":{"error":str(e)},"timestamp":int(time.time()*1000)}) + '\n')
                         except Exception:
@@ -261,7 +284,7 @@ class EtherscanClient:
                 # #region agent log
                 try:
                     fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"etherscan.py:217","message":"New session created","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:
@@ -353,7 +376,7 @@ class EtherscanClient:
             # #region agent log
             try:
                 fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                with open(_get_debug_log_path(), 'a') as f:
                     import json
                     f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:280","message":"Before HTTP request","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
             except Exception:
@@ -363,7 +386,7 @@ class EtherscanClient:
                 # #region agent log
                 try:
                     fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:282","message":"HTTP response context entered","data":{"fd_count":fd_count,"status":response.status},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:
@@ -382,7 +405,7 @@ class EtherscanClient:
                 # #region agent log
                 try:
                     fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"etherscan.py:295","message":"After response.json()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:
@@ -628,7 +651,7 @@ class EtherscanClient:
         # #region agent log
         try:
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:524","message":"close() called","data":{"fd_count":fd_count,"has_session":self._session is not None},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -648,7 +671,7 @@ class EtherscanClient:
                         # #region agent log
                         try:
                             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                            with open(_get_debug_log_path(), 'a') as f:
                                 import json
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:535","message":"Connector closed","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
                         except Exception:
@@ -665,7 +688,7 @@ class EtherscanClient:
                 # #region agent log
                 try:
                     fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:543","message":"Session closed","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:
@@ -681,7 +704,7 @@ class EtherscanClient:
                 # #region agent log
                 try:
                     fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-                    with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+                    with open(_get_debug_log_path(), 'a') as f:
                         import json
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"etherscan.py:550","message":"After sleep, close complete","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
                 except Exception:

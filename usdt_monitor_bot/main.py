@@ -8,8 +8,10 @@ Telegram bot configuration, and transaction checking scheduler.
 # Standard library
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 # Third-party
 from aiogram import Bot, Dispatcher
@@ -24,6 +26,28 @@ from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
+
+# Debug log path - works in both local and container environments
+_DEBUG_LOG_PATH = None
+
+
+def _get_debug_log_path() -> str:
+    """Get the debug log file path, creating it if necessary."""
+    global _DEBUG_LOG_PATH
+    if _DEBUG_LOG_PATH is None:
+        # Try to find workspace root by looking for .cursor directory or pyproject.toml
+        current = Path.cwd()
+        for parent in [current] + list(current.parents):
+            if (parent / ".cursor").exists() or (parent / "pyproject.toml").exists():
+                _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
+                # Ensure .cursor directory exists
+                (parent / ".cursor").mkdir(exist_ok=True)
+                break
+        else:
+            # Fallback: use current directory
+            _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
+            Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+    return _DEBUG_LOG_PATH
 
 
 async def main() -> None:
@@ -105,9 +129,8 @@ async def main() -> None:
         scheduler.shutdown(wait=True)  # Wait for running jobs to complete
         # #region agent log
         try:
-            import os
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:103","message":"Before closing resources","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -116,9 +139,8 @@ async def main() -> None:
         await etherscan_client.close()
         # #region agent log
         try:
-            import os
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:105","message":"After etherscan_client.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
@@ -127,9 +149,8 @@ async def main() -> None:
         await bot.session.close()
         # #region agent log
         try:
-            import os
             fd_count = len(os.listdir('/proc/self/fd')) if os.path.exists('/proc/self/fd') else -1
-            with open('/Users/igor.khomiakov/Code/usdt_monitor_bot/.cursor/debug.log', 'a') as f:
+            with open(_get_debug_log_path(), 'a') as f:
                 import json
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"main.py:106","message":"After bot.session.close()","data":{"fd_count":fd_count},"timestamp":int(time.time()*1000)}) + '\n')
         except Exception:
