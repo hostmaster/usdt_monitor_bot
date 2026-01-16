@@ -32,21 +32,38 @@ _DEBUG_LOG_PATH = None
 
 
 def _get_debug_log_path() -> str:
-    """Get the debug log file path, creating it if necessary."""
+    """Get the debug log file path, creating it if necessary.
+    
+    Works in both local development and container environments.
+    In containers, uses /app/data/.cursor/debug.log (writable data directory).
+    In local dev, finds workspace root by looking for .cursor or pyproject.toml.
+    """
     global _DEBUG_LOG_PATH
     if _DEBUG_LOG_PATH is None:
-        # Try to find workspace root by looking for .cursor directory or pyproject.toml
         current = Path.cwd()
-        for parent in [current] + list(current.parents):
-            if (parent / ".cursor").exists() or (parent / "pyproject.toml").exists():
-                _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
-                # Ensure .cursor directory exists
-                (parent / ".cursor").mkdir(exist_ok=True)
-                break
+        
+        # Check if we're in a container (working directory is /app)
+        if str(current) == "/app" or (len(current.parts) > 0 and current.parts[-1] == "app"):
+            # Container environment: use /app/data/.cursor/debug.log (writable data dir)
+            _DEBUG_LOG_PATH = "/app/data/.cursor/debug.log"
+            try:
+                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+            except (OSError, PermissionError):
+                # Fallback to /app/.cursor if data directory fails
+                _DEBUG_LOG_PATH = "/app/.cursor/debug.log"
+                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
         else:
-            # Fallback: use current directory
-            _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
-            Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
+            # Local development: try to find workspace root
+            for parent in [current] + list(current.parents):
+                if (parent / ".cursor").exists() or (parent / "pyproject.toml").exists():
+                    _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
+                    # Ensure .cursor directory exists
+                    (parent / ".cursor").mkdir(exist_ok=True)
+                    break
+            else:
+                # Fallback: use current directory
+                _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
+                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
     return _DEBUG_LOG_PATH
 
 
