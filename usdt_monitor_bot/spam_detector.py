@@ -221,15 +221,32 @@ class SpamDetector:
             tx_from_normalized = tx.from_address.lower().replace("0x", "")
             tx_to_normalized = tx.to_address.lower().replace("0x", "")
 
-            # If from_address or to_address is whitelisted, return safe analysis
-            if tx_from_normalized in whitelist_normalized or tx_to_normalized in whitelist_normalized:
+            # Only whitelist if FROM address is whitelisted (outgoing from trusted source)
+            # Do NOT whitelist if TO address is whitelisted (incoming transactions should still be analyzed for spam)
+            if tx_from_normalized in whitelist_normalized:
+                # #region agent log
+                try:
+                    from pathlib import Path
+                    import json
+                    import time
+                    current = Path.cwd()
+                    if str(current) == "/app" or (len(current.parts) > 0 and current.parts[-1] == "app"):
+                        log_path = "/app/data/.cursor/debug.log"
+                    else:
+                        log_path = str(Path.cwd() / ".cursor" / "debug.log")
+                    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+                    with open(log_path, "a") as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"G","location":"spam_detector.py:224","message":"Transaction whitelisted (from address)","data":{"tx_hash":tx.tx_hash,"from_address":tx.from_address,"to_address":tx.to_address,"from_normalized":tx_from_normalized,"to_normalized":tx_to_normalized,"from_whitelisted":tx_from_normalized in whitelist_normalized,"to_whitelisted":tx_to_normalized in whitelist_normalized},"timestamp":int(time.time()*1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
                 return RiskAnalysis(
                     score=0,
                     flags=[],
                     is_suspicious=False,
                     similarity_score=0,
-                    recommendation="✅ Whitelisted address - Low risk transaction",
-                    details={"whitelisted": True},
+                    recommendation="✅ Whitelisted sender address - Low risk transaction",
+                    details={"whitelisted": True, "whitelisted_from": True},
                 )
 
         score = 0
@@ -243,9 +260,40 @@ class SpamDetector:
             details["dust_amount"] = float(tx.value)
 
         # ========== FILTER 2: Zero-Value Transfer ==========
+        # #region agent log
+        try:
+            from pathlib import Path
+            import json
+            import time
+            current = Path.cwd()
+            if str(current) == "/app" or (len(current.parts) > 0 and current.parts[-1] == "app"):
+                log_path = "/app/data/.cursor/debug.log"
+            else:
+                log_path = str(Path.cwd() / ".cursor" / "debug.log")
+            Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"H","location":"spam_detector.py:246","message":"Checking zero value","data":{"tx_hash":tx.tx_hash,"value":str(tx.value),"value_type":type(tx.value).__name__,"value_float":float(tx.value),"equals_zero":tx.value == Decimal("0"),"equals_zero_str":str(tx.value) == "0"},"timestamp":int(time.time()*1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         if tx.value == Decimal("0"):
             score += self.config["zero_value_weight"]
             flags.add(RiskFlag.ZERO_VALUE_TRANSFER)
+            # #region agent log
+            try:
+                from pathlib import Path
+                import json
+                import time
+                current = Path.cwd()
+                if str(current) == "/app" or (len(current.parts) > 0 and current.parts[-1] == "app"):
+                    log_path = "/app/data/.cursor/debug.log"
+                else:
+                    log_path = str(Path.cwd() / ".cursor" / "debug.log")
+                with open(log_path, "a") as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"H","location":"spam_detector.py:249","message":"Zero value flag added","data":{"tx_hash":tx.tx_hash,"score_after":score},"timestamp":int(time.time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
 
         # ========== FILTER 3: Timing + Address Similarity ==========
         last_tx_checked_for_similarity = False
