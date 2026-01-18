@@ -415,7 +415,7 @@ class TransactionChecker:
                 risk_score=risk_score,
             )
         except Exception as e:
-            logging.warning(f"DB store failed: tx={tx_metadata.tx_hash[:16]}... err={e}")
+            logging.warning(f"DB store failed: tx={tx_metadata.tx_hash[:16]}... err={e}", exc_info=True)
 
     async def _process_single_transaction(
         self,
