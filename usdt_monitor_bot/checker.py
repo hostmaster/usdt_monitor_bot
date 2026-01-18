@@ -67,38 +67,26 @@ class TransactionChecker:
         self._spam_detection_enabled = True  # Enable by default
         # Cache for contract creation blocks to avoid repeated API calls
         self._contract_creation_cache: dict[str, Optional[int]] = {}
-        logging.info("TransactionChecker initialized.")
+        logging.debug("TransactionChecker initialized")
 
     def _handle_etherscan_error(
         self, error: Exception, token_symbol: str, address_lower: str
     ) -> None:
         """Handle Etherscan API errors with appropriate logging."""
+        addr_short = f"{address_lower[:8]}..."
         if isinstance(error, EtherscanRateLimitError):
-            logging.warning(
-                f"Rate limited while fetching {token_symbol} for {address_lower}. "
-                "Some transactions may be missed in this cycle."
-            )
+            logging.warning(f"Rate limited: {token_symbol} for {addr_short}")
         elif isinstance(error, EtherscanError):
             error_msg = str(error)
             # Skip logging for "No transactions found" - expected for inactive addresses
             if "No transactions found" in error_msg:
                 return
-
             if "NOTOK" in error_msg:
-                logging.warning(
-                    f"Error checking {token_symbol} transactions for {address_lower}: {error_msg}. "
-                    "This may indicate a query timeout or API issue. The address will be retried in the next cycle."
-                )
+                logging.warning(f"API error {token_symbol}/{addr_short}: {error_msg}")
             else:
-                logging.error(
-                    f"Error checking {token_symbol} transactions for {address_lower}: {error_msg}"
-                )
+                logging.error(f"Etherscan error {token_symbol}/{addr_short}: {error_msg}")
         else:
-            # Unexpected error
-            logging.error(
-                f"Unexpected error fetching {token_symbol} for {address_lower}: {error}",
-                exc_info=True,
-            )
+            logging.error(f"Fetch error {token_symbol}/{addr_short}: {error}", exc_info=True)
 
     async def _fetch_transactions_for_address(
         self, address_lower: str, query_start_block: int
@@ -165,14 +153,12 @@ class TransactionChecker:
                 ).total_seconds()
 
                 if age_seconds > max_age_seconds:
-                    logging.debug(f"Skipping transaction {tx.get('hash')} due to age.")
+                    logging.debug(f"Skip old tx: {tx.get('hash', '')[:16]}...")
                     continue
 
                 filtered.append(tx)
             except (ValueError, TypeError) as e:
-                logging.warning(
-                    f"Invalid data in transaction {tx.get('hash', 'unknown')}: {e}. Skipping."
-                )
+                logging.debug(f"Invalid tx data {tx.get('hash', 'N/A')[:16]}: {e}")
 
         # Sort by block number descending to get the newest transactions first
         filtered.sort(key=lambda x: int(x.get("blockNumber", 0)), reverse=True)
@@ -205,18 +191,14 @@ class TransactionChecker:
             value_str = tx.get("value", "0")
 
             if not tx_hash or not from_address or not to_address:
-                logging.warning(
-                    f"Missing required fields in transaction: {tx.get('hash', 'unknown')}"
-                )
+                logging.debug(f"Missing fields in tx: {tx.get('hash', 'N/A')[:16]}")
                 return None
 
             # Convert timestamp
             try:
                 timestamp = datetime.fromtimestamp(int(timestamp_str), tz=timezone.utc)
             except (ValueError, TypeError) as e:
-                logging.warning(
-                    f"Invalid timestamp {timestamp_str} for tx {tx_hash}: {e}"
-                )
+                logging.debug(f"Invalid timestamp in tx {tx_hash[:16]}: {e}")
                 return None
 
             # Convert value from token units to USDT (divide by 10^decimals)
@@ -224,7 +206,7 @@ class TransactionChecker:
                 value_raw = Decimal(value_str)
                 value_usdt = value_raw / Decimal(10**token_decimals)
             except (ValueError, TypeError) as e:
-                logging.warning(f"Invalid value {value_str} for tx {tx_hash}: {e}")
+                logging.debug(f"Invalid value in tx {tx_hash[:16]}: {e}")
                 return None
 
             return TransactionMetadata(
@@ -239,10 +221,7 @@ class TransactionChecker:
                 gas_price=0,  # Not available in token transfer API
             )
         except Exception as e:
-            logging.error(
-                f"Error converting transaction to metadata: {e}",
-                exc_info=True,
-            )
+            logging.debug(f"Metadata conversion error: {e}", exc_info=True)
             return None
 
     def _parse_timestamp(self, timestamp_str: str) -> Optional[datetime]:
@@ -260,7 +239,7 @@ class TransactionChecker:
                 return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             return datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
         except (ValueError, TypeError):
-            logging.warning(f"Invalid timestamp format in DB: {timestamp_str}")
+            logging.debug(f"Invalid DB timestamp: {timestamp_str}")
             return None
 
     def _convert_db_transaction_to_metadata(
@@ -292,10 +271,7 @@ class TransactionChecker:
                 gas_price=0,
             )
         except Exception as e:
-            logging.warning(
-                f"Error converting DB transaction to metadata: {e}",
-                exc_info=True,
-            )
+            logging.debug(f"DB tx conversion error: {e}", exc_info=True)
             return None
 
     async def _get_historical_transactions_metadata(
@@ -324,10 +300,7 @@ class TransactionChecker:
 
             return historical_metadata
         except Exception as e:
-            logging.error(
-                f"Error retrieving historical transactions for {address_lower}: {e}",
-                exc_info=True,
-            )
+            logging.debug(f"Historical tx error for {address_lower[:8]}: {e}")
             return []
 
     async def _get_contract_age_blocks(self, address: str, current_block: int) -> int:
@@ -364,11 +337,7 @@ class TransactionChecker:
             if creation_block is not None:
                 return max(0, current_block - creation_block)
         except Exception as e:
-            logging.warning(
-                f"Error getting contract age for {address_lower}: {e}",
-                exc_info=True,
-            )
-            # Cache None to avoid repeated failed calls
+            logging.debug(f"Contract age lookup failed for {address_lower[:8]}: {e}")
             self._contract_creation_cache[address_lower] = None
 
         return 0  # Default to 0 if unable to determine
@@ -417,9 +386,10 @@ class TransactionChecker:
         )
 
         if risk_analysis.is_suspicious:
+            flags_str = ",".join(f.value for f in risk_analysis.flags)
             logging.warning(
-                f"Suspicious transaction detected: {tx_metadata.tx_hash} "
-                f"(score: {risk_analysis.score}/100, flags: {[f.value for f in risk_analysis.flags]})"
+                f"Spam detected: tx={tx_metadata.tx_hash[:16]}... "
+                f"score={risk_analysis.score}/100 flags=[{flags_str}]"
             )
 
         return risk_analysis
@@ -445,10 +415,7 @@ class TransactionChecker:
                 risk_score=risk_score,
             )
         except Exception as e:
-            logging.warning(
-                f"Failed to store transaction {tx_metadata.tx_hash} in database: {e}",
-                exc_info=True,
-            )
+            logging.warning(f"DB store failed: tx={tx_metadata.tx_hash[:16]}... err={e}")
 
     async def _process_single_transaction(
         self,
@@ -473,15 +440,13 @@ class TransactionChecker:
         tx_token_symbol = tx.get("token_symbol")
 
         if not tx_hash or not tx_token_symbol:
-            logging.warning(f"Transaction missing hash or symbol, skipping: {tx}")
+            logging.debug(f"Skipping tx without hash/symbol: {tx.get('hash', 'N/A')[:16]}")
             return 0
 
         # Get token config
         token_config = self._config.token_registry.get_token(tx_token_symbol)
         if not token_config:
-            logging.warning(
-                f"Token config not found for {tx_token_symbol}, skipping spam detection"
-            )
+            logging.debug(f"Unknown token {tx_token_symbol}, skip spam detection")
 
         # Process with spam detection (only if token config is available)
         risk_analysis: Optional[RiskAnalysis] = None
@@ -536,15 +501,10 @@ class TransactionChecker:
                     tx, user_ids, address_lower, historical_metadata
                 )
             except Exception as e:
-                logging.error(
-                    f"Unexpected error processing transaction {tx.get('hash', 'N/A')}: {e}",
-                    exc_info=True,
-                )
+                logging.error(f"Process tx error {tx.get('hash', 'N/A')[:16]}: {e}", exc_info=True)
 
         if notifications_sent > 0:
-            logging.info(
-                f"Sent {notifications_sent} notifications for {address_lower}."
-            )
+            logging.debug(f"Sent {notifications_sent} notifications for {address_lower[:8]}...")
 
     async def _process_address_transactions(
         self,
@@ -587,9 +547,7 @@ class TransactionChecker:
         processing_batch = self._filter_transactions(all_transactions, start_block)
 
         if not processing_batch:
-            logging.debug(
-                f"No transactions to notify for {address_lower} after filtering."
-            )
+            logging.debug(f"No tx after filtering for {address_lower[:8]}...")
             # Cap to latest_block if available to prevent getting ahead of blockchain
             result_block = max(start_block, max_seen_block)
             result_block = self._cap_block_to_latest(
@@ -602,14 +560,11 @@ class TransactionChecker:
 
         user_ids = await self._db.get_users_for_address(address_lower)
         if not user_ids:
-            logging.warning(
-                f"Found {len(processing_batch)} tx(s) for {address_lower}, but no users are tracking it."
-            )
-            # No users tracking this address, so nothing is actually processed
+            logging.debug(f"No users tracking {address_lower[:8]}... ({len(processing_batch)} tx found)")
             processed_count = 0
         else:
             processed_count = len(processing_batch)
-            logging.info(f"Processing {processed_count} new tx(s) for {address_lower}")
+            logging.debug(f"Processing {processed_count} tx for {address_lower[:8]}...")
             await self._send_notifications_for_batch(
                 user_ids, processing_batch, address_lower
             )
@@ -645,14 +600,11 @@ class TransactionChecker:
         """
         if latest_block is not None and block_value > latest_block:
             context_str = f" ({context})" if context else ""
-            message = (
-                f"Capping {block_value} to latest_block ({latest_block}) "
-                f"for {address_lower}{context_str} to prevent getting ahead of blockchain."
-            )
+            msg = f"Capping block {block_value}->{latest_block} for {address_lower[:8]}...{context_str}"
             if log_level == "warning":
-                logging.warning(message)
+                logging.warning(msg)
             else:
-                logging.debug(message)
+                logging.debug(msg)
             return latest_block
         return block_value
 
@@ -679,10 +631,7 @@ class TransactionChecker:
         # Only advance if no transactions found to prevent getting stuck
         if not raw_transactions and new_last_block == start_block:
             final_block = start_block + 1
-            logging.warning(
-                f"Could not get latest block number for {address_lower}. "
-                f"Advancing from {start_block} to {final_block} to prevent getting stuck."
-            )
+            logging.warning(f"No latest block for {address_lower[:8]}..., advancing {start_block}->{final_block}")
         return BlockDeterminationResult(
             final_block_number=final_block,
             resetting_to_latest=False,
@@ -710,21 +659,11 @@ class TransactionChecker:
         resetting_to_latest = False
 
         if latest_block < start_block:
-            # Database is ahead of blockchain - reset
-            logging.warning(
-                f"Latest block ({latest_block}) < start_block ({start_block}) for {address_lower}. "
-                f"Database appears ahead of blockchain. Resetting to {latest_block}."
-            )
+            logging.warning(f"DB ahead of chain for {address_lower[:8]}...: {start_block}->{latest_block}")
             return latest_block, True
 
         if new_last_block > latest_block:
-            # Processed block is ahead - cap it
-            # This can happen if Etherscan returns transactions with block numbers ahead of current latest_block
-            # (e.g., due to timing, reorgs, or API inconsistencies)
-            logging.warning(
-                f"Processed block ({new_last_block}) > latest block ({latest_block}) for {address_lower}. "
-                f"Capping to {latest_block} to prevent getting ahead of blockchain."
-            )
+            logging.warning(f"Block cap for {address_lower[:8]}...: {new_last_block}->{latest_block}")
             return latest_block, True
 
         return new_last_block, resetting_to_latest
@@ -765,21 +704,10 @@ class TransactionChecker:
         )
 
         # If no transactions found and blockchain hasn't advanced, update to latest
-        # BUT only if latest_block >= start_block to prevent getting ahead of blockchain
         if not raw_transactions and final_block == start_block:
-            if latest_block > start_block:
-                logging.debug(
-                    f"Advancing block for {address_lower} from {start_block} to {latest_block}"
-                )
+            if latest_block >= start_block:
+                logging.debug(f"Advance {address_lower[:8]}... {start_block}->{latest_block}")
                 final_block = latest_block
-            elif latest_block == start_block:
-                logging.debug(
-                    f"Blockchain hasn't advanced for {address_lower}. "
-                    f"Updating to {latest_block} to record check."
-                )
-                final_block = latest_block
-            # If latest_block < start_block, the sync already handled it (reset to latest_block)
-            # so we don't need to do anything here
 
         return BlockDeterminationResult(
             final_block_number=final_block,
@@ -804,15 +732,12 @@ class TransactionChecker:
             await asyncio.sleep(self._config.etherscan_request_delay)
             start_block = await self._db.get_last_checked_block(address_lower)
 
-            logging.debug(f"Checking {address_lower} from block {start_block + 1}")
+            logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
 
-            # Fetch latest block early to cap transaction block numbers and prevent getting ahead
+            # Fetch latest block early to cap transaction block numbers
             latest_block = await self._etherscan.get_latest_block_number()
             if latest_block is None:
-                logging.warning(
-                    f"Could not fetch latest block for {address_lower}. Proceeding without cap."
-                )
-                latest_block = None  # Will be handled in _determine_next_block
+                logging.debug(f"No latest block for {address_lower[:8]}..., proceeding without cap")
 
             raw_transactions = await self._fetch_transactions_for_address(
                 address_lower, start_block + 1
@@ -859,16 +784,13 @@ class TransactionChecker:
                 stats["addresses_updated"] += 1
 
         except EtherscanRateLimitError:
-            logging.warning(f"Rate limit for {address_lower}. Skipping this cycle.")
+            logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
             stats["warnings_count"] += 1
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logging.error(f"Network error for {address_lower}: {e}. Skipping.")
+            logging.error(f"Network error {address_lower[:8]}...: {e}")
             stats["errors_count"] += 1
         except Exception as e:
-            logging.error(
-                f"Critical error processing {address_lower}: {e}",
-                exc_info=True,
-            )
+            logging.error(f"Error processing {address_lower[:8]}...: {e}", exc_info=True)
             stats["errors_count"] += 1
 
     def _should_update_block(
@@ -887,62 +809,41 @@ class TransactionChecker:
         block_result: BlockDeterminationResult,
         actual_block: Optional[int] = None,
     ) -> None:
-        """
-        Log block update with appropriate level.
-
-        Args:
-            address_lower: The monitored address
-            start_block: The starting block number
-            block_result: The block determination result
-            actual_block: Optional actual block number being written (if different from block_result)
-        """
-        # Use actual_block if provided (e.g., after final defensive check), otherwise use result
-        new_block = (
-            actual_block
-            if actual_block is not None
-            else block_result.final_block_number
-        )
+        """Log block update with appropriate level."""
+        new_block = actual_block if actual_block is not None else block_result.final_block_number
+        addr_short = f"{address_lower[:8]}..."
         if block_result.resetting_to_latest:
-            logging.info(
-                f"Resetting block for {address_lower} from {start_block} to {new_block} to sync with blockchain"
-            )
+            logging.info(f"Block reset {addr_short}: {start_block}->{new_block}")
         elif new_block > start_block:
-            logging.debug(
-                f"Updating block for {address_lower} from {start_block} to {new_block}"
-            )
+            logging.debug(f"Block update {addr_short}: {start_block}->{new_block}")
         else:
-            logging.debug(
-                f"Recording check for {address_lower} at block {start_block} (no new transactions, no advancement)"
-            )
+            logging.debug(f"Block unchanged {addr_short}: {start_block}")
 
     def _log_cycle_summary(
         self, stats: dict, cycle_duration: float, address_count: int
     ) -> None:
         """Log cycle summary and detailed statistics."""
-        summary_parts = []
-        if stats["total_transactions_processed"] > 0:
-            summary_parts.append(
-                f"processed {stats['total_transactions_processed']} new transaction(s)"
-            )
-        if stats["errors_count"] > 0:
-            summary_parts.append(f"{stats['errors_count']} error(s)")
-        if stats["warnings_count"] > 0:
-            summary_parts.append(f"{stats['warnings_count']} warning(s)")
+        tx_proc = stats["total_transactions_processed"]
+        errors = stats["errors_count"]
+        warnings = stats["warnings_count"]
 
-        if summary_parts:
-            logging.info(
-                f"Transaction check cycle complete: {', '.join(summary_parts)} in {cycle_duration:.2f}s"
-            )
-        else:
-            logging.info(f"Transaction check cycle complete in {cycle_duration:.2f}s")
+        # Compact INFO summary
+        parts = [f"{address_count} addr"]
+        if tx_proc > 0:
+            parts.append(f"{tx_proc} tx")
+        if errors > 0:
+            parts.append(f"{errors} err")
+        if warnings > 0:
+            parts.append(f"{warnings} warn")
+        parts.append(f"{cycle_duration:.1f}s")
 
+        logging.info(f"Cycle done: {', '.join(parts)}")
+
+        # Detailed DEBUG stats
         logging.debug(
-            f"Cycle statistics: checked {address_count} address(es), "
-            f"found {stats['total_transactions_found']} transaction(s), "
-            f"processed {stats['total_transactions_processed']} new transaction(s) "
-            f"from {stats['addresses_with_transactions']} address(es), "
-            f"updated {stats['addresses_updated']} address(es), "
-            f"{stats['errors_count']} error(s), {stats['warnings_count']} warning(s)"
+            f"Cycle stats: found={stats['total_transactions_found']} "
+            f"processed={tx_proc} from_addr={stats['addresses_with_transactions']} "
+            f"updated={stats['addresses_updated']} err={errors} warn={warnings}"
         )
 
     async def check_all_addresses(self) -> None:
@@ -957,13 +858,10 @@ class TransactionChecker:
         addresses_to_check = await self._db.get_distinct_addresses()
 
         if not addresses_to_check:
-            logging.info("Transaction check cycle: No addresses to monitor.")
+            logging.debug("No addresses to monitor")
             return
 
-        logging.info("Starting transaction check cycle...")
-        logging.debug(
-            f"Checking {len(addresses_to_check)} address(es) for new transactions"
-        )
+        logging.debug(f"Checking {len(addresses_to_check)} addresses")
 
         stats = {
             "total_transactions_found": 0,
@@ -979,9 +877,7 @@ class TransactionChecker:
             await self._process_single_address(address.lower(), stats, update_tasks)
 
         if update_tasks:
-            logging.debug(
-                f"Updating last checked blocks for {len(update_tasks)} addresses..."
-            )
+            logging.debug(f"Updating blocks for {len(update_tasks)} addresses")
             await asyncio.gather(*update_tasks, return_exceptions=True)
 
         cycle_duration = time.time() - cycle_start_time
