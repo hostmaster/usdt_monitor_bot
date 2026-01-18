@@ -43,9 +43,9 @@ jobs:
         run: |
           uv pip install --system -e ".[test]"
 
-      - name: Run tests
+      - name: Run tests in parallel
         run: |
-          python -m pytest tests/ -v --tb=short --junitxml=test-results.xml
+          python -m pytest tests/ --tb=short --junitxml=test-results.xml
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
