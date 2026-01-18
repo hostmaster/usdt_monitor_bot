@@ -5,6 +5,12 @@ services:
     volumes:
       - usdt_monitor_data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "from usdt_monitor_bot.health import ready; exit(0 if ready() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     logging:
       driver: "json-file"
       options:
