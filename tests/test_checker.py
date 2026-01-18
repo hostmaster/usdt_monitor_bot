@@ -643,7 +643,7 @@ async def test_handle_etherscan_error_unexpected(checker: TransactionChecker, ca
         error = RuntimeError("Something unexpected happened")
         checker._handle_etherscan_error(error, "USDT", ADDR1)
 
-    assert "Unexpected error" in caplog.text
+    assert "Fetch error" in caplog.text
 
 
 # --- Tests for Transaction Metadata Conversion ---
@@ -674,7 +674,7 @@ async def test_convert_to_transaction_metadata_invalid_timestamp(
     checker: TransactionChecker, caplog
 ):
     """Test that transactions with invalid timestamps return None."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         tx = {
             "hash": "0x123",
             "from": "0xsender",
@@ -692,7 +692,7 @@ async def test_convert_to_transaction_metadata_invalid_value(
     checker: TransactionChecker, caplog
 ):
     """Test that transactions with invalid values return None."""
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.DEBUG):
         tx = {
             "hash": "0x123",
             "from": "0xsender",
@@ -704,7 +704,7 @@ async def test_convert_to_transaction_metadata_invalid_value(
         result = checker._convert_to_transaction_metadata(tx, 6)
         assert result is None
         # The error is caught by the outer exception handler
-        assert "Error converting transaction to metadata" in caplog.text
+        assert "Invalid value" in caplog.text or "Metadata conversion error" in caplog.text
 
 
 # --- Tests for Timestamp Parsing ---
@@ -729,10 +729,10 @@ async def test_parse_timestamp_unix_format(checker: TransactionChecker):
 
 async def test_parse_timestamp_invalid_format(checker: TransactionChecker, caplog):
     """Test that invalid timestamp formats return None."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         result = checker._parse_timestamp("invalid-timestamp")
         assert result is None
-        assert "Invalid timestamp format" in caplog.text
+        assert "Invalid DB timestamp" in caplog.text
 
 
 # --- Tests for Filter Transactions ---
@@ -791,13 +791,13 @@ async def test_transactions_found_but_no_users_tracking(
     mock_etherscan.get_token_transactions.side_effect = [[tx], []]
     mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         await checker.check_all_addresses()
 
     # No notifications should be sent
     mock_notifier.send_token_notification.assert_not_awaited()
-    # Warning should be logged
-    assert "no users are tracking it" in caplog.text
+    # Debug log indicates no users tracking
+    assert "No users tracking" in caplog.text
 
 
 # --- Tests for Process Single Transaction Errors ---
