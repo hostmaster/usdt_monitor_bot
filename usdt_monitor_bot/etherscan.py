@@ -195,15 +195,13 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
-                # Close old session and connector before creating new one
+                # Close old session before creating new one
+                # session.close() automatically closes the owned connector
                 if self._session:
                     try:
-                        old_connector = getattr(self._session, "connector", None)
-                        if old_connector and hasattr(old_connector, "close"):
-                            await old_connector.close()
                         await self._session.close()
                     except Exception as e:
-                        logging.debug(f"Error closing old session before creating new (non-critical): {e}")
+                        logging.debug(f"Error closing old session (non-critical): {e}")
                 self._session = self._create_session()
 
     async def __aenter__(self):
@@ -532,29 +530,18 @@ class EtherscanClient:
         # We don't catch it here to allow retry mechanism to work
 
     async def close(self):
-        """Close the session and its connector if they exist."""
+        """Close the session if it exists.
+
+        The session.close() method automatically closes the owned connector.
+        """
         if self._session:
             try:
-                # Get connector before closing session
-                connector = getattr(self._session, "connector", None)
-
-                # Explicitly close idle connections before closing the session
-                # This helps release file descriptors immediately
-                if connector and hasattr(connector, "close"):
-                    try:
-                        await connector.close()
-                    except Exception as e:
-                        logging.debug(f"Error closing connector connections (non-critical): {e}")
-
-                # Always attempt to close - aiohttp sessions handle already-closed gracefully
                 await self._session.close()
-
-                # Wait 0.2 seconds for connections to close gracefully.
-                await asyncio.sleep(0.2)
+                # Brief wait for graceful connection cleanup
+                await asyncio.sleep(0.1)
             except (aiohttp.ClientError, RuntimeError) as e:
                 # If closing fails (e.g., already closed or event loop closed), log and continue
                 logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
             except Exception as e:
-                # Catch any other unexpected errors but log them
                 logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
         self._session = None
