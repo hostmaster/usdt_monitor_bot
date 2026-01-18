@@ -1,4 +1,5 @@
 # tests/test_checker.py
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -8,9 +9,11 @@ from usdt_monitor_bot.checker import TransactionChecker
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
     EtherscanClient,
+    EtherscanError,
     EtherscanRateLimitError,
 )
 from usdt_monitor_bot.notifier import NotificationService
+from usdt_monitor_bot.spam_detector import SpamDetector
 
 pytestmark = pytest.mark.asyncio
 
@@ -603,8 +606,6 @@ async def test_spam_detection_with_custom_detector(
     mock_notifier: AsyncMock,
 ):
     """Test that custom spam detector can be injected."""
-    from usdt_monitor_bot.spam_detector import SpamDetector
-
     custom_detector = SpamDetector(config={"suspicious_score_threshold": 100})
     checker = TransactionChecker(
         mock_config, mock_db, mock_etherscan, mock_notifier, spam_detector=custom_detector
@@ -620,8 +621,6 @@ async def test_handle_etherscan_error_no_transactions_found(
     checker: TransactionChecker, caplog
 ):
     """Test that 'No transactions found' errors are silently ignored."""
-    from usdt_monitor_bot.etherscan import EtherscanError
-
     error = EtherscanError("No transactions found")
     checker._handle_etherscan_error(error, "USDT", ADDR1)
 
@@ -631,9 +630,6 @@ async def test_handle_etherscan_error_no_transactions_found(
 
 async def test_handle_etherscan_error_notok(checker: TransactionChecker, caplog):
     """Test that NOTOK errors are logged as warnings."""
-    import logging
-    from usdt_monitor_bot.etherscan import EtherscanError
-
     with caplog.at_level(logging.WARNING):
         error = EtherscanError("API error: NOTOK - query timeout")
         checker._handle_etherscan_error(error, "USDT", ADDR1)
@@ -643,8 +639,6 @@ async def test_handle_etherscan_error_notok(checker: TransactionChecker, caplog)
 
 async def test_handle_etherscan_error_unexpected(checker: TransactionChecker, caplog):
     """Test that unexpected errors are logged with full traceback."""
-    import logging
-
     with caplog.at_level(logging.ERROR):
         error = RuntimeError("Something unexpected happened")
         checker._handle_etherscan_error(error, "USDT", ADDR1)
@@ -659,8 +653,6 @@ async def test_convert_to_transaction_metadata_missing_fields(
     checker: TransactionChecker, caplog
 ):
     """Test that transactions with missing required fields return None."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         # Missing hash
         tx_no_hash = {"from": "0xsender", "to": "0xrecipient", "value": "1000000"}
@@ -682,8 +674,6 @@ async def test_convert_to_transaction_metadata_invalid_timestamp(
     checker: TransactionChecker, caplog
 ):
     """Test that transactions with invalid timestamps return None."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         tx = {
             "hash": "0x123",
@@ -702,8 +692,6 @@ async def test_convert_to_transaction_metadata_invalid_value(
     checker: TransactionChecker, caplog
 ):
     """Test that transactions with invalid values return None."""
-    import logging
-
     with caplog.at_level(logging.ERROR):
         tx = {
             "hash": "0x123",
@@ -741,8 +729,6 @@ async def test_parse_timestamp_unix_format(checker: TransactionChecker):
 
 async def test_parse_timestamp_invalid_format(checker: TransactionChecker, caplog):
     """Test that invalid timestamp formats return None."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         result = checker._parse_timestamp("invalid-timestamp")
         assert result is None
@@ -798,8 +784,6 @@ async def test_transactions_found_but_no_users_tracking(
     caplog,
 ):
     """Test behavior when transactions are found but no users track the address."""
-    import logging
-
     tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
@@ -826,8 +810,6 @@ async def test_process_transaction_missing_hash_or_symbol(
     caplog,
 ):
     """Test that transactions missing hash or symbol are skipped."""
-    import logging
-
     mock_db.get_recent_transactions.return_value = []
 
     with caplog.at_level(logging.WARNING):

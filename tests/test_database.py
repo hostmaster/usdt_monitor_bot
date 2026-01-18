@@ -1,4 +1,6 @@
 # tests/test_database.py
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from usdt_monitor_bot.database import DatabaseManager, WalletAddResult
@@ -306,8 +308,6 @@ async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
     await memory_db_manager.add_user(4, "user4", "U", "4")
     await memory_db_manager.add_wallet(4, monitored_addr)
 
-    from datetime import datetime, timedelta, timezone
-
     # Store old transaction (35 days ago)
     old_timestamp = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
     await memory_db_manager.store_transaction(
@@ -548,8 +548,6 @@ async def test_cleanup_old_transactions_none_to_clean(
     monitored_addr = "0xdddddddddddddddddddddddddddddddddddddddd"
     await memory_db_manager.add_user(4, "user4", "U", "4")
     await memory_db_manager.add_wallet(4, monitored_addr)
-
-    from datetime import datetime, timezone
 
     # Store only recent transaction
     recent_timestamp = datetime.now(timezone.utc).isoformat()

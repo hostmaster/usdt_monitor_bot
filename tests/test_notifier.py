@@ -1,12 +1,14 @@
 # tests/test_notifier.py
-from unittest.mock import AsyncMock, MagicMock  # Import MagicMock
+import logging
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiogram.exceptions import TelegramAPIError
 
 from usdt_monitor_bot.config import BotConfig, TokenConfig
-
-# Import exceptions correctly
 from usdt_monitor_bot.notifier import NotificationService
+from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
 
 pytestmark = pytest.mark.asyncio
 
@@ -333,8 +335,6 @@ async def test_send_token_notification_spam_short_notice(
     notifier: NotificationService, mock_telegram_bot
 ):
     """Test that spam transactions send a short notice instead of full details."""
-    from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
-
     monitored_address_val = TX1_INCOMING_USDT["to"]
     spam_tx = TX1_INCOMING_USDT.copy()
 
@@ -374,8 +374,6 @@ async def test_send_token_notification_empty_tx(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test that empty transaction data is handled gracefully."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         await notifier.send_token_notification(
             USER1, {}, "USDT", ADDR1
@@ -390,8 +388,6 @@ async def test_send_token_notification_none_tx(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test that None transaction is handled gracefully."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         await notifier.send_token_notification(
             USER1, None, "USDT", ADDR1
@@ -405,8 +401,6 @@ async def test_send_token_notification_invalid_user_id(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test that invalid user_id is handled gracefully."""
-    import logging
-
     with caplog.at_level(logging.WARNING):
         # Zero user_id
         await notifier.send_token_notification(
@@ -428,9 +422,6 @@ async def test_send_token_notification_telegram_api_error(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test handling of Telegram API errors during message sending."""
-    import logging
-    from aiogram.exceptions import TelegramAPIError
-
     mock_telegram_bot.send_message.side_effect = TelegramAPIError(
         method="sendMessage", message="Chat not found"
     )
@@ -506,8 +497,6 @@ async def test_format_token_message_negative_value(notifier: NotificationService
 @pytest.mark.asyncio
 async def test_format_token_message_future_timestamp(notifier: NotificationService):
     """Test that far future timestamp returns None."""
-    from datetime import datetime, timezone
-
     # Timestamp 2 hours in the future (beyond allowed tolerance)
     future_ts = int(datetime.now(timezone.utc).timestamp()) + 7200
 
