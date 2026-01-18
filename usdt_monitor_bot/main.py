@@ -13,6 +13,7 @@ from datetime import datetime
 # Third-party
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -23,7 +24,6 @@ from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
-
 
 async def main() -> None:
     # 1. Configure basic logging first (before config load, which also logs)
@@ -60,12 +60,17 @@ async def main() -> None:
         return  # Or raise an exception
 
     # 4. Initialize Bot and Dispatcher
+    # Note: AiohttpSession in aiogram 3.24 only accepts 'proxy' and 'limit' parameters.
+    # It internally creates its own TCPConnector. We can only control the connection limit.
+    # The EtherscanClient uses force_close=True for its connector to prevent FD leaks.
+    bot_session = AiohttpSession(limit=10)  # Reduced from default 100
     bot = Bot(
         token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=bot_session,
     )
     dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
-    logging.info("Aiogram Bot and Dispatcher initialized.")
+    logging.info("Aiogram Bot and Dispatcher initialized with custom session (limit=10).")
 
     # 5. Initialize Services (Clients, Notifier, Checker)
     etherscan_client = EtherscanClient(config=config)

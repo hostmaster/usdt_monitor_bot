@@ -26,6 +26,7 @@ from tenacity import (
 from usdt_monitor_bot.config import BotConfig
 
 
+
 class EtherscanError(Exception):
     """Base class for Etherscan API errors."""
 
@@ -155,19 +156,20 @@ class EtherscanClient:
     def _create_connector(self) -> TCPConnector:
         """Create a TCPConnector with configured limits to prevent file descriptor exhaustion.
 
-        Connection pooling (keep-alive) is enabled by default to improve performance
-        by reusing TCP connections and avoiding repeated TLS handshakes.
-
         Returns:
             A configured TCPConnector instance.
         """
         # Create connector with strict limits to prevent file descriptor exhaustion
-        # Connection pooling is enabled by default (force_close=False) for better performance
-        return TCPConnector(
+        # FIX: Use force_close=True to close connections after each request
+        # FIX: Enable cleanup_closed to clean up closed SSL transports
+        connector = TCPConnector(
             limit=self.MAX_TOTAL_CONNECTIONS,
             limit_per_host=self.MAX_CONNECTIONS_PER_HOST,
             ttl_dns_cache=self.DNS_CACHE_TTL_SECONDS,
+            force_close=True,  # Close connections after each request to prevent FD accumulation
+            enable_cleanup_closed=True,  # Enable cleanup of closed SSL transports
         )
+        return connector
 
     def _create_session(self) -> aiohttp.ClientSession:
         """Create a ClientSession with configured timeout and connector.
@@ -193,6 +195,13 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
+                # Close old session before creating new one
+                # session.close() automatically closes the owned connector
+                if self._session:
+                    try:
+                        await self._session.close()
+                    except Exception as e:
+                        logging.debug(f"Error closing old session (non-critical): {e}")
                 self._session = self._create_session()
 
     async def __aenter__(self):
@@ -521,41 +530,18 @@ class EtherscanClient:
         # We don't catch it here to allow retry mechanism to work
 
     async def close(self):
-        """Close the session and its connector if they exist."""
+        """Close the session if it exists.
+
+        The session.close() method automatically closes the owned connector.
+        """
         if self._session:
             try:
-                # Get connector before closing session
-                connector = getattr(self._session, "connector", None)
-
-                # Explicitly close idle connections before closing the session
-                # This helps release file descriptors immediately
-                if connector and hasattr(connector, "close"):
-                    try:
-                        # Close idle connections to free up file descriptors
-                        await connector.close()
-                    except Exception as e:
-                        logging.debug(
-                            f"Error closing connector connections (non-critical): {e}"
-                        )
-
-                # Always attempt to close - aiohttp sessions handle already-closed gracefully
-                # For mocks, this ensures close() is called
                 await self._session.close()
-
-                # Wait 0.2 seconds for connections to close gracefully.
-                # This brief delay allows aiohttp's connection pool to properly release
-                # file descriptors and close underlying TCP connections before the event
-                # loop continues. Without this, connections may not be fully closed when
-                # the session.close() coroutine completes, potentially leading to resource leaks.
-                await asyncio.sleep(0.2)
+                # Brief wait for graceful connection cleanup
+                await asyncio.sleep(0.1)
             except (aiohttp.ClientError, RuntimeError) as e:
                 # If closing fails (e.g., already closed or event loop closed), log and continue
-                logging.debug(
-                    f"Error closing EtherscanClient session (non-critical): {e}"
-                )
+                logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
             except Exception as e:
-                # Catch any other unexpected errors but log them
-                logging.warning(
-                    f"Unexpected error closing EtherscanClient session: {e}"
-                )
+                logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
         self._session = None

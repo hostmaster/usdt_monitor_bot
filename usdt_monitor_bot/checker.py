@@ -17,6 +17,7 @@ from typing import List, Literal, Optional
 # Third-party
 import aiohttp
 
+
 # Local
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
@@ -401,19 +402,18 @@ class TransactionChecker:
         )
         tx_metadata.contract_age_blocks = contract_age
 
-        # Build whitelist: monitored address + official token contract addresses
-        whitelisted_addresses = {
-            address_lower
-        }  # Whitelist the monitored address itself
-        # Add all official token contract addresses to whitelist
+        # Build whitelist of trusted addresses (token contracts only)
+        # The monitored address is passed separately to enable spam detection on incoming transactions
+        whitelisted_addresses = set()
         for token in self._config.token_registry.get_all_tokens().values():
             whitelisted_addresses.add(token.contract_address)
 
-        # Analyze transaction with whitelist
+        # Analyze transaction with whitelist and monitored address
         risk_analysis = self._spam_detector.analyze_transaction(
             tx_metadata,
             historical_metadata,
             whitelisted_addresses=whitelisted_addresses,
+            monitored_address=address_lower,
         )
 
         if risk_analysis.is_suspicious:
