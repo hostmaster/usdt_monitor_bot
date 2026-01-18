@@ -374,13 +374,13 @@ async def test_send_token_notification_empty_tx(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test that empty transaction data is handled gracefully."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         await notifier.send_token_notification(
             USER1, {}, "USDT", ADDR1
         )
 
     mock_telegram_bot.send_message.assert_not_called()
-    assert "empty transaction data" in caplog.text
+    assert "Empty tx data" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -401,7 +401,7 @@ async def test_send_token_notification_invalid_user_id(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
     """Test that invalid user_id is handled gracefully."""
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         # Zero user_id
         await notifier.send_token_notification(
             0, TX1_INCOMING_USDT, "USDT", ADDR1
@@ -431,7 +431,7 @@ async def test_send_token_notification_telegram_api_error(
             USER1, TX1_INCOMING_USDT, "USDT", ADDR1
         )
 
-    assert "Failed to send message" in caplog.text
+    assert "Send failed" in caplog.text
 
 
 @pytest.mark.asyncio

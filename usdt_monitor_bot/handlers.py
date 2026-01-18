@@ -95,22 +95,16 @@ async def add_wallet_handler(
 
     if status == WalletAddResult.ADDED:
         reply_text = messages.add_wallet_success(address_lower)
-        logging.info(f"User {user.id} added wallet: {address_lower}")
+        logging.info(f"Wallet added: user={user.id} addr={address_lower[:10]}...")
     elif status == WalletAddResult.ALREADY_EXISTS:
         reply_text = messages.add_wallet_already_exists(address_lower)
-        logging.info(
-            f"User {user.id} attempted to add existing wallet: {address_lower}"
-        )
+        logging.debug(f"Wallet exists: user={user.id} addr={address_lower[:10]}...")
     elif status == WalletAddResult.DB_ERROR:
         reply_text = messages.ERROR_UNEXPECTED
-        logging.error(
-            f"DB_ERROR while user {user.id} attempted to add wallet: {address_lower}"
-        )
-    else:  # Should not happen with the defined Enum
+        logging.error(f"DB error adding wallet: user={user.id}")
+    else:
         reply_text = messages.ERROR_UNEXPECTED
-        logging.error(
-            f"Unknown WalletAddResult status {status} for user {user.id}, address {address_lower}"
-        )
+        logging.error(f"Unknown add result: {status} user={user.id}")
 
     await message.reply(reply_text)
 
@@ -128,7 +122,7 @@ async def list_wallets_handler(message: Message, db_manager: DatabaseManager):
 
     if user_wallets is None:
         await message.reply(messages.LIST_WALLETS_ERROR)
-        logging.error(f"Failed to retrieve wallet list for user {user.id}")
+        logging.error(f"List wallets failed: user={user.id}")
     elif not user_wallets:
         await message.reply(messages.LIST_WALLETS_EMPTY)
     else:
@@ -161,7 +155,7 @@ async def remove_wallet_handler(
 
     if removed:
         reply_text = messages.remove_wallet_success(address_lower)
-        logging.info(f"User {user.id} removed wallet: {address_lower}")
+        logging.info(f"Wallet removed: user={user.id} addr={address_lower[:10]}...")
     else:
         reply_text = messages.remove_wallet_not_found(address_lower)
 
@@ -176,8 +170,5 @@ async def other_message_handler(message: Message):
 
 def register_handlers(dp: Dispatcher, db_manager: DatabaseManager):
     """Registers all command and message handlers with the dispatcher."""
-    # Pass db_manager to handlers that need it using functools.partial or lambda
-    # Aiogram 3.x supports passing dependencies directly if defined in handler signature
-    # and provided during router/dispatcher setup (which we do below)
     dp.include_router(router)
-    logging.info("Bot handlers registered.")
+    logging.debug("Handlers registered")

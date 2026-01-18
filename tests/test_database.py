@@ -204,9 +204,7 @@ async def test_add_wallet_db_error_on_tracked_addresses_insert(
     # According to current logic in _add_wallet_sync, if wallets insert is successful,
     # it returns ADDED, even if tracked_addresses insert fails (it logs an error).
     assert result == WalletAddResult.ADDED
-    assert "DB error while ensuring" in caplog.text
-    assert address.lower() in caplog.text
-    assert "is in tracked_addresses" in caplog.text
+    assert "Track address failed" in caplog.text
 
 
 async def test_store_and_retrieve_transaction(memory_db_manager: DatabaseManager):

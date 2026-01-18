@@ -29,7 +29,7 @@ class DatabaseManager:
     def __init__(self, db_path: str, timeout: int = 10):
         self.db_path = db_path
         self.timeout = timeout
-        logging.info(f"DatabaseManager initialized with path: {self.db_path}")
+        logging.debug(f"DatabaseManager: {self.db_path}")
 
     def _execute_db_query(
         self,
@@ -91,7 +91,7 @@ class DatabaseManager:
         Returns:
             True if initialization succeeded, False otherwise
         """
-        logging.info("Initializing database tables...")
+        logging.debug("Initializing database tables...")
         queries = [
             """CREATE TABLE IF NOT EXISTS users (
                    user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_name TEXT,
@@ -128,15 +128,13 @@ class DatabaseManager:
         ]
         success = True
         for query in queries:
-            if not self._execute_db_query(
-                query, commit=False
-            ):  # CREATE doesn't need commit usually
-                logging.error(f"Failed to execute table creation: {query[:50]}...")
+            if not self._execute_db_query(query, commit=False):
+                logging.error(f"DB table creation failed: {query[:40]}...")
                 success = False
         if success:
-            logging.info("Database initialization check complete.")
+            logging.info("Database initialized")
         else:
-            logging.error("Errors occurred during database initialization.")
+            logging.error("Database initialization failed")
         return success
 
     async def init_db(self) -> bool:
@@ -173,35 +171,25 @@ class DatabaseManager:
         )
 
         if rowcount > 0:
-            # Successfully inserted a new wallet, now ensure it's in tracked_addresses
+            # Successfully inserted, ensure it's in tracked_addresses
             tracked_rowcount = self._execute_db_query(
                 "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
                 (address_lower,),
                 commit=True,
             )
-            if tracked_rowcount == -1:  # Error adding to tracked_addresses
-                logging.error(
-                    f"DB error while ensuring {address_lower} is in tracked_addresses after adding to wallets table for user {user_id}."
-                )
-                # This is a tricky state. The wallet is added for the user, but tracking might fail.
-                # For now, report as ADDED because the primary user-facing operation succeeded.
-                # Consider a compensating transaction or more robust error handling here if critical.
-                return WalletAddResult.ADDED  # Or a new specific error state
+            if tracked_rowcount == -1:
+                logging.error(f"Track address failed: {address_lower[:8]}...")
+                return WalletAddResult.ADDED
             return WalletAddResult.ADDED
         elif rowcount == 0:
-            # No rows affected means (user_id, address) already exists
-            # Still ensure it's in tracked_addresses, as it might have been added by another user
-            # and this user is just re-adding it.
+            # Already exists, still ensure tracking
             tracked_rowcount = self._execute_db_query(
                 "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
                 (address_lower,),
                 commit=True,
             )
-            if tracked_rowcount == -1:  # Error adding to tracked_addresses
-                logging.error(
-                    f"DB error while ensuring {address_lower} is in tracked_addresses for an ALREADY_EXISTS wallet for user {user_id}."
-                )
-            # If this fails, it's not critical for the "already exists" status for this user.
+            if tracked_rowcount == -1:
+                logging.error(f"Track address failed: {address_lower[:8]}...")
             return WalletAddResult.ALREADY_EXISTS
         else:  # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
             return WalletAddResult.DB_ERROR

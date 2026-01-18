@@ -29,7 +29,7 @@ class NotificationService:
     def __init__(self, bot: Bot, config: BotConfig):
         self._bot = bot
         self._config = config
-        logging.info("NotificationService initialized.")
+        logging.debug("NotificationService initialized")
 
     def _format_token_message(
         self,
@@ -57,101 +57,68 @@ class NotificationService:
         try:
             # Quick validation of required fields
             if not all([tx_hash, address, token_config]):
-                logging.warning(f"Missing required fields for transaction {tx_hash}")
+                logging.debug(f"Missing fields for tx {tx_hash}")
                 return None
 
             # Validate transaction hash
-            if not isinstance(tx_hash, str):
-                logging.warning(f"Invalid transaction hash: {tx_hash}")
-                return None
-            if not tx_hash.startswith("0x"):
-                logging.warning(f"Transaction hash {tx_hash} must start with '0x'")
+            if not isinstance(tx_hash, str) or not tx_hash.startswith("0x"):
+                logging.debug(f"Invalid tx hash: {tx_hash}")
                 return None
 
             # Validate address
-            if not isinstance(address, str):
-                logging.warning(f"Invalid address: {address}")
-                return None
-            if not address.startswith("0x"):
-                logging.warning(f"Address {address} must start with '0x'")
+            if not isinstance(address, str) or not address.startswith("0x"):
+                logging.debug(f"Invalid address: {address}")
                 return None
 
             # Validate value
-            if not isinstance(value, (int, float)):
-                logging.warning(
-                    f"Invalid value type: {type(value)}, expected int or float"
-                )
-                return None
-            if value < 0:
-                logging.warning(f"Negative value not allowed: {value}")
+            if not isinstance(value, (int, float)) or value < 0:
+                logging.debug(f"Invalid value: {value}")
                 return None
 
             # Validate token config
             if not isinstance(token_config, TokenConfig):
-                logging.warning(f"Invalid token configuration: {token_config}")
+                logging.debug(f"Invalid token config: {token_config}")
                 return None
 
             # Validate timestamp
-            if not isinstance(timestamp, int):
-                logging.warning(
-                    f"Invalid timestamp type: {type(timestamp)}, expected int"
-                )
-                return None
             current_time = int(datetime.now(timezone.utc).timestamp())
-            if timestamp < 0 or timestamp > current_time + ALLOWED_FUTURE_TIME_SECONDS:
-                logging.warning(f"Timestamp {timestamp} is out of valid range")
+            if not isinstance(timestamp, int) or timestamp < 0 or timestamp > current_time + ALLOWED_FUTURE_TIME_SECONDS:
+                logging.debug(f"Invalid timestamp: {timestamp}")
                 return None
 
-            # Format the value with proper error handling
+            # Format the value
             try:
                 formatted_value = format_token_amount(value, token_config.decimals)
                 if formatted_value is None:
-                    logging.warning(
-                        f"Could not format value {value} for transaction {tx_hash}"
-                    )
+                    logging.debug(f"Value format failed: {value}")
                     return None
             except (ValueError, TypeError) as e:
-                logging.warning(
-                    f"Error formatting value for transaction {tx_hash}: {e}",
-                    exc_info=True,
-                )
+                logging.debug(f"Value format error: {e}")
                 return None
 
-            # Format the address with proper error handling
+            # Format the address
             try:
                 address_to_show = format_address(address)
                 if not address_to_show:
-                    logging.warning(f"Invalid address format for transaction {tx_hash}")
+                    logging.debug(f"Address format failed: {address}")
                     return None
             except Exception as e:
-                logging.warning(
-                    f"Error formatting address for transaction {tx_hash}: {e}",
-                    exc_info=True,
-                )
+                logging.debug(f"Address format error: {e}")
                 return None
 
-            # Format the timestamp with proper error handling
+            # Format the timestamp
             try:
                 formatted_time = format_timestamp(timestamp)
                 if not formatted_time:
-                    logging.warning(
-                        f"Invalid timestamp {timestamp} for transaction {tx_hash}"
-                    )
-                    # Skip returning None here to allow further processing
+                    logging.debug(f"Timestamp format failed: {timestamp}")
             except Exception as e:
-                logging.warning(
-                    f"Error formatting timestamp for transaction {tx_hash}: {e}",
-                    exc_info=True,
-                )
+                logging.debug(f"Timestamp format error: {e}")
                 return None
 
             # For spam transactions, send a short notice instead of full details
             if risk_analysis and risk_analysis.is_suspicious:
-                # Short spam notice
                 try:
-                    # Get main flag for brief description
                     main_flag = risk_analysis.flags[0].value if risk_analysis.flags else "Suspicious"
-                    # address_to_show is already formatted by format_address() above
                     message = (
                         f"⚠️ {hbold('Spam Detected')}\n"
                         f"From: {hcode(address_to_show)}\n"
@@ -161,17 +128,14 @@ class NotificationService:
                     )
                     return message
                 except Exception as e:
-                    logging.error(
-                        f"Error constructing spam notice for transaction {tx_hash}: {e}",
-                        exc_info=True,
-                    )
+                    logging.warning(f"Spam notice build error: {e}", exc_info=True)
                     return None
 
             # Normal transaction - full details
             # Determine the direction label
             address_label = "From" if is_incoming else "To"
 
-            # Construct the message with proper error handling
+            # Construct the message
             try:
                 message = (
                     f"🔔 New {token_config.symbol} Transfer!\n"
@@ -182,15 +146,11 @@ class NotificationService:
                 )
                 return message
             except Exception as e:
-                logging.error(
-                    f"Error constructing message for transaction {tx_hash}: {e}",
-                    exc_info=True,
-                )
+                logging.warning(f"Message build error: {e}", exc_info=True)
                 return None
 
         except Exception as e:
-            error_msg = f"Unexpected error formatting transaction {tx_hash}: {str(e)}"
-            logging.error(error_msg, exc_info=True)
+            logging.error(f"Format tx error {tx_hash}: {e}", exc_info=True)
             return None
 
     async def send_token_notification(
@@ -211,19 +171,19 @@ class NotificationService:
             monitored_address: The address being monitored
         """
         if not tx:
-            logging.warning("Received empty transaction data, skipping notification")
+            logging.debug("Empty tx data, skip notification")
             return
 
         try:
             # Validate user_id
             if not isinstance(user_id, int) or user_id <= 0:
-                logging.warning(f"Invalid user_id: {user_id}, skipping notification")
+                logging.debug(f"Invalid user_id: {user_id}")
                 return
 
             # Get token configuration
             token_config = self._config.token_registry.get_token(token_type)
             if not token_config:
-                logging.error(f"Token configuration not found for {token_type}")
+                logging.debug(f"Unknown token: {token_type}")
                 return
 
             # Add monitored address to transaction data for message formatting
@@ -239,12 +199,8 @@ class NotificationService:
             tx_to_lower = tx_data.get("to", "").lower()
 
             if tx_from_lower == tx_to_lower:
-                is_incoming = (
-                    False  # Treat self-transfers as outgoing for notification purposes
-                )
-                logging.info(
-                    f"Self-transfer detected for transaction {tx_data.get('hash', 'unknown')}"
-                )
+                is_incoming = False  # Treat self-transfers as outgoing
+                logging.debug(f"Self-transfer: {tx_data.get('hash', 'N/A')[:16]}...")
             else:
                 is_incoming = monitored_address_lower == tx_to_lower
 
@@ -265,31 +221,20 @@ class NotificationService:
             # Only send the message if it was successfully formatted
             if message is not None:
                 try:
-                    # Send the message
                     await self._bot.send_message(
                         chat_id=user_id,
                         text=message,
                         parse_mode=ParseMode.HTML,
                         disable_web_page_preview=True,
                     )
-                    logging.info(
-                        f"Successfully sent notification to user {user_id} for tx {tx.get('hash', 'unknown')}"
-                    )
+                    logging.info(f"Notify user={user_id} tx={tx.get('hash', 'N/A')[:16]}...")
                 except Exception as e:
-                    logging.error(
-                        f"Failed to send message to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
-                        exc_info=True,
-                    )
+                    logging.error(f"Send failed user={user_id}: {e}")
             else:
-                logging.warning(
-                    f"Message formatting failed for tx {tx.get('hash', 'unknown')}, skipping notification"
-                )
+                logging.debug(f"Format failed, skip notify for tx={tx.get('hash', 'N/A')[:16]}")
 
         except Exception as e:
-            logging.error(
-                f"Unexpected error sending notification to user {user_id} for tx {tx.get('hash', 'unknown')}: {e}",
-                exc_info=True,
-            )
+            logging.error(f"Notify error user={user_id}: {e}", exc_info=True)
 
 
 def format_token_amount(value: float, decimals: int = 6) -> str:

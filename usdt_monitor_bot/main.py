@@ -26,16 +26,10 @@ from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
 
 async def main() -> None:
-    # 1. Configure basic logging first (before config load, which also logs)
-    # We'll adjust the level after loading config
+    # 1. Configure basic logging first (before config load)
     logging.basicConfig(
-        level=logging.INFO,  # Start with INFO, will adjust based on config
-        format="%(asctime)s - %(name)s:%(lineno)d - %(levelname)s - %(message)s",
-        # Optional: Add file handler
-        # handlers=[
-        #     logging.StreamHandler(),
-        #     logging.FileHandler("bot.log")
-        # ]
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     # 2. Load Configuration
@@ -44,35 +38,29 @@ async def main() -> None:
     # 3. Adjust logging level based on verbose setting
     if config.verbose_logging:
         logging.getLogger().setLevel(logging.DEBUG)
-        logging.debug("Verbose logging enabled (DEBUG level).")
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-        logging.info("Logging configured (INFO level).")
+        logging.debug("DEBUG logging enabled")
 
     # Suppress verbose logs from third-party libraries
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
-    # 3. Initialize Database
+    # 4. Initialize Database
     db_manager = DatabaseManager(db_path=config.db_path)
     if not await db_manager.init_db():
-        logging.critical("Database initialization failed. Exiting.")
-        return  # Or raise an exception
+        logging.critical("Database init failed, exiting")
+        return
 
-    # 4. Initialize Bot and Dispatcher
-    # Note: AiohttpSession in aiogram 3.24 only accepts 'proxy' and 'limit' parameters.
-    # It internally creates its own TCPConnector. We can only control the connection limit.
-    # The EtherscanClient uses force_close=True for its connector to prevent FD leaks.
-    bot_session = AiohttpSession(limit=10)  # Reduced from default 100
+    # 5. Initialize Bot and Dispatcher
+    bot_session = AiohttpSession(limit=10)
     bot = Bot(
         token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
-    dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
-    logging.info("Aiogram Bot and Dispatcher initialized with custom session (limit=10).")
+    dp = Dispatcher(db_manager=db_manager)
+    logging.debug("Bot initialized with session limit=10")
 
-    # 5. Initialize Services (Clients, Notifier, Checker)
+    # 6. Initialize Services
     etherscan_client = EtherscanClient(config=config)
     notifier = NotificationService(bot=bot, config=config)
     transaction_checker = TransactionChecker(
@@ -82,10 +70,10 @@ async def main() -> None:
         notifier=notifier,
     )
 
-    # 6. Register Handlers
-    register_handlers(dp, db_manager)  # db_manager already passed to Dispatcher
+    # 7. Register Handlers
+    register_handlers(dp, db_manager)
 
-    # 7. Setup and Start Scheduler
+    # 8. Setup and Start Scheduler
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         transaction_checker.check_all_addresses,
@@ -96,20 +84,17 @@ async def main() -> None:
         replace_existing=True,
     )
     scheduler.start()
-    logging.info(
-        f"Scheduler started. Checking transactions every {config.check_interval_seconds} seconds."
-    )
 
-    # 8. Start Bot Polling
-    logging.info("Starting bot polling...")
+    # 9. Start Bot Polling
+    logging.info("Bot started, polling for updates...")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         logging.info("Shutting down...")
-        scheduler.shutdown(wait=True)  # Wait for running jobs to complete
+        scheduler.shutdown(wait=True)
         await etherscan_client.close()
         await bot.session.close()
-        logging.info("Scheduler shut down. Bot session closed. Exiting.")
+        logging.debug("Cleanup complete")
 
 
 if __name__ == "__main__":

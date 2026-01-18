@@ -87,7 +87,7 @@ class AdaptiveRateLimiter:
         )
         self._consecutive_successes = 0
         self._last_rate_limit_time = time.time()
-        logging.info(f"Rate limit hit. Increasing delay to {self._current_delay:.2f}s")
+        logging.info(f"Rate limit hit, delay={self._current_delay:.2f}s")
 
     def on_success(self) -> None:
         """Called when a request succeeds. Gradually reduces delay if stable."""
@@ -104,12 +104,9 @@ class AdaptiveRateLimiter:
                 self._current_delay * self._recovery_factor, self._min_delay
             )
             if new_delay < self._current_delay:
-                logging.info(
-                    f"Reducing delay from {self._current_delay:.2f}s to {new_delay:.2f}s "
-                    f"({self._consecutive_successes} consecutive successes)"
-                )
+                logging.debug(f"Delay reduced: {self._current_delay:.2f}s->{new_delay:.2f}s")
                 self._current_delay = new_delay
-                self._consecutive_successes = 0  # Reset counter after reduction
+                self._consecutive_successes = 0
 
     @property
     def current_delay(self) -> float:
@@ -151,7 +148,7 @@ class EtherscanClient:
             success_threshold=config.rate_limiter_success_threshold,
             recovery_cooldown=config.rate_limiter_recovery_cooldown,
         )
-        logging.debug("EtherscanClient initialized.")
+        logging.debug(f"EtherscanClient: delay={initial_delay}s")
 
     def _create_connector(self) -> TCPConnector:
         """Create a TCPConnector with configured limits to prevent file descriptor exhaustion.
@@ -199,7 +196,7 @@ class EtherscanClient:
                     try:
                         await self._session.close()
                     except Exception as e:
-                        logging.debug(f"Error closing old session (non-critical): {e}")
+                        logging.debug(f"Session close error: {e}")
                 self._session = self._create_session()
 
     async def __aenter__(self):
@@ -371,9 +368,7 @@ class EtherscanClient:
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
-                    logging.warning(
-                        f"Failed to get contract creation: status {response.status}"
-                    )
+                    logging.debug(f"Contract creation API status={response.status}")
                     return None
 
                 data = await response.json()
@@ -394,7 +389,7 @@ class EtherscanClient:
                     try:
                         return int(block_number)
                     except (ValueError, TypeError):
-                        logging.warning(f"Invalid block number format: {block_number}")
+                        logging.debug(f"Invalid block number: {block_number}")
                         return None
 
                 return None
@@ -402,14 +397,10 @@ class EtherscanClient:
         try:
             return await self._make_request_with_rate_limiting(_make_request)
         except EtherscanRateLimitError:
-            logging.warning(
-                f"Rate limited while fetching contract creation for {contract_address}"
-            )
+            logging.debug(f"Rate limited: contract creation {contract_address[:10]}...")
             return None
         except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logging.warning(
-                f"Error fetching contract creation block for {contract_address}: {e}"
-            )
+            logging.debug(f"Contract creation error {contract_address[:10]}...: {e}")
             return None
 
     @retry(
@@ -444,9 +435,7 @@ class EtherscanClient:
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
                 if response.status != 200:
-                    logging.warning(
-                        f"Failed to get latest block number: status {response.status}"
-                    )
+                    logging.debug(f"Latest block API status={response.status}")
                     return None
 
                 data = await response.json()
@@ -455,11 +444,7 @@ class EtherscanClient:
                 # Check for JSON-RPC error first
                 if "error" in data:
                     error = data.get("error", {})
-                    error_message = error.get("message", "Unknown error")
-                    error_code = error.get("code", "unknown")
-                    logging.warning(
-                        f"Failed to get latest block number: JSON-RPC error {error_code}: {error_message}"
-                    )
+                    logging.debug(f"Latest block RPC error: {error.get('message', 'unknown')}")
                     return None
 
                 # Check for result in JSON-RPC format
@@ -473,49 +458,35 @@ class EtherscanClient:
                             f"Rate limit error in response: {result_str}"
                         )
 
-                    # Validate that result is a hex string (starts with "0x" and contains valid hex)
+                    # Validate that result is a hex string
                     if not isinstance(result, str) or not result.startswith("0x"):
-                        logging.warning(
-                            f"Invalid block number format (not hex): {result_str}"
-                        )
+                        logging.debug(f"Invalid block format: {result_str}")
                         return None
 
                     # Validate hex string contains only valid hex characters
-                    hex_part = result[2:]  # Remove "0x" prefix
-                    if not hex_part or not all(
-                        c in "0123456789abcdefABCDEF" for c in hex_part
-                    ):
-                        logging.warning(
-                            f"Invalid block number format (invalid hex): {result_str}"
-                        )
+                    hex_part = result[2:]
+                    if not hex_part or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                        logging.debug(f"Invalid hex in block: {result_str}")
                         return None
 
                     try:
-                        # Convert hex string to int (e.g., "0x1234" -> 4660)
                         block_number = int(result, 16)
-                        logging.debug(f"Latest block number fetched: {block_number}")
+                        logging.debug(f"Latest block: {block_number}")
                         return block_number
                     except (ValueError, TypeError) as e:
-                        # Check if the error is due to a rate limit message in result field
                         result_str = str(result).lower()
-                        if "rate limit" in result_str or (
-                            "rate" in result_str and "limit" in result_str
-                        ):
-                            raise EtherscanRateLimitError(
-                                f"Rate limit error in response: {result}"
-                            )
-                        logging.warning(
-                            f"Failed to parse block number: {result_str}. Error: {e}"
-                        )
+                        if "rate limit" in result_str or ("rate" in result_str and "limit" in result_str):
+                            raise EtherscanRateLimitError(f"Rate limit: {result}")
+                        logging.debug(f"Block parse error: {e}")
                         return None
 
-                logging.warning("Latest block number API returned empty result")
+                logging.debug("Empty latest block response")
                 return None
 
         try:
             return await self._make_request_with_rate_limiting(_make_request)
         except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logging.warning(f"Error fetching latest block number: {e}")
+            logging.debug(f"Latest block fetch error: {e}")
             return None
         # EtherscanRateLimitError is handled by @retry decorator
         # If all retries fail, it will be reraised (reraise=True)
@@ -529,11 +500,9 @@ class EtherscanClient:
         if self._session:
             try:
                 await self._session.close()
-                # Brief wait for graceful connection cleanup
                 await asyncio.sleep(0.1)
             except (aiohttp.ClientError, RuntimeError) as e:
-                # If closing fails (e.g., already closed or event loop closed), log and continue
-                logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
+                logging.debug(f"Session close: {e}")
             except Exception as e:
-                logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
+                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
         self._session = None

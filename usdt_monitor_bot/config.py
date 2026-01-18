@@ -128,248 +128,85 @@ class BotConfig:
         return self.token_registry.is_supported_token(address)
 
 
+def _get_env_float(name: str, default: float) -> float:
+    """Get float from environment with validation."""
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        result = float(value)
+        logging.debug(f"{name}={result} (env)")
+        return result
+    except ValueError:
+        logging.warning(f"Invalid {name}='{value}', using default={default}")
+        return default
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Get int from environment with validation."""
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        result = int(value)
+        logging.debug(f"{name}={result} (env)")
+        return result
+    except ValueError:
+        logging.warning(f"Invalid {name}='{value}', using default={default}")
+        return default
+
+
 def load_config() -> BotConfig:
     """Loads configuration from environment variables."""
     load_dotenv()  # Load .env file if present
-    logging.info("--- Loading Configuration ---")
 
     # Required environment variables
     try:
-        telegram_bot_token_env = os.environ["TELEGRAM_BOT_TOKEN"]
-        logging.info("TELEGRAM_BOT_TOKEN: Loaded from environment.")
-        telegram_bot_token = telegram_bot_token_env
-
-        etherscan_api_key_env = os.environ["ETHERSCAN_API_KEY"]
-        logging.info("ETHERSCAN_API_KEY: Loaded from environment.")
-        etherscan_api_key = etherscan_api_key_env
+        telegram_bot_token = os.environ["TELEGRAM_BOT_TOKEN"]
+        etherscan_api_key = os.environ["ETHERSCAN_API_KEY"]
     except KeyError as e:
-        logging.error(f"!!! Environment variable {e} not found!")
+        logging.error(f"Missing required env var: {e}")
         sys.exit(f"Environment variable {e} not configured. Exiting.")
 
     # Optional environment variables with defaults
-    default_db_path = os.path.join(DATA_DIR, "usdt_monitor.db")
-    db_path_env = os.getenv("DB_PATH")
-    if db_path_env:
-        db_path = db_path_env
-        logging.info(f"DB_PATH: Loaded from environment variable ('{db_path}').")
-    else:
-        db_path = default_db_path
-        logging.info(f"DB_PATH: Using default value ('{db_path}').")
-
-    default_etherscan_base_url = "https://api.etherscan.io/v2/api"
-    etherscan_base_url_env = os.getenv("ETHERSCAN_BASE_URL")
-    if etherscan_base_url_env:
-        etherscan_base_url = etherscan_base_url_env
-        logging.info(
-            f"ETHERSCAN_BASE_URL: Loaded from environment ('{etherscan_base_url}')."
-        )
-    else:
-        etherscan_base_url = default_etherscan_base_url
-        logging.info(
-            f"ETHERSCAN_BASE_URL: Using default value ('{etherscan_base_url}')."
-        )
-
-    default_etherscan_request_delay = 0.5  # Increased to stay under 3 req/sec limit
-    etherscan_request_delay_env = os.getenv("ETHERSCAN_REQUEST_DELAY")
-    if etherscan_request_delay_env:
-        try:
-            etherscan_request_delay = float(etherscan_request_delay_env)
-            logging.info(
-                f"ETHERSCAN_REQUEST_DELAY: Loaded from environment (value: {etherscan_request_delay})."
-            )
-        except ValueError:
-            etherscan_request_delay = default_etherscan_request_delay
-            logging.warning(
-                f"ETHERSCAN_REQUEST_DELAY: Invalid value '{etherscan_request_delay_env}' from environment. Using default value ({etherscan_request_delay})."
-            )
-    else:
-        etherscan_request_delay = default_etherscan_request_delay
-        logging.info(
-            f"ETHERSCAN_REQUEST_DELAY: Using default value ({etherscan_request_delay})."
-        )
+    db_path = os.getenv("DB_PATH", os.path.join(DATA_DIR, "usdt_monitor.db"))
+    etherscan_base_url = os.getenv(
+        "ETHERSCAN_BASE_URL", "https://api.etherscan.io/v2/api"
+    )
+    etherscan_request_delay = _get_env_float("ETHERSCAN_REQUEST_DELAY", 0.5)
 
     # Rate limiter configuration
-    default_rate_limiter_min_delay = 0.4
-    rate_limiter_min_delay_env = os.getenv("RATE_LIMITER_MIN_DELAY")
-    if rate_limiter_min_delay_env:
-        try:
-            rate_limiter_min_delay = float(rate_limiter_min_delay_env)
-            logging.info(
-                f"RATE_LIMITER_MIN_DELAY: Loaded from environment (value: {rate_limiter_min_delay})."
-            )
-        except ValueError:
-            rate_limiter_min_delay = default_rate_limiter_min_delay
-            logging.warning(
-                f"RATE_LIMITER_MIN_DELAY: Invalid value '{rate_limiter_min_delay_env}' from environment. Using default value ({rate_limiter_min_delay})."
-            )
-    else:
-        rate_limiter_min_delay = default_rate_limiter_min_delay
-        logging.info(
-            f"RATE_LIMITER_MIN_DELAY: Using default value ({rate_limiter_min_delay})."
-        )
-
-    default_rate_limiter_max_delay = 10.0
-    rate_limiter_max_delay_env = os.getenv("RATE_LIMITER_MAX_DELAY")
-    if rate_limiter_max_delay_env:
-        try:
-            rate_limiter_max_delay = float(rate_limiter_max_delay_env)
-            logging.info(
-                f"RATE_LIMITER_MAX_DELAY: Loaded from environment (value: {rate_limiter_max_delay})."
-            )
-        except ValueError:
-            rate_limiter_max_delay = default_rate_limiter_max_delay
-            logging.warning(
-                f"RATE_LIMITER_MAX_DELAY: Invalid value '{rate_limiter_max_delay_env}' from environment. Using default value ({rate_limiter_max_delay})."
-            )
-    else:
-        rate_limiter_max_delay = default_rate_limiter_max_delay
-        logging.info(
-            f"RATE_LIMITER_MAX_DELAY: Using default value ({rate_limiter_max_delay})."
-        )
-
-    default_rate_limiter_backoff_factor = 2.5
-    rate_limiter_backoff_factor_env = os.getenv("RATE_LIMITER_BACKOFF_FACTOR")
-    if rate_limiter_backoff_factor_env:
-        try:
-            rate_limiter_backoff_factor = float(rate_limiter_backoff_factor_env)
-            logging.info(
-                f"RATE_LIMITER_BACKOFF_FACTOR: Loaded from environment (value: {rate_limiter_backoff_factor})."
-            )
-        except ValueError:
-            rate_limiter_backoff_factor = default_rate_limiter_backoff_factor
-            logging.warning(
-                f"RATE_LIMITER_BACKOFF_FACTOR: Invalid value '{rate_limiter_backoff_factor_env}' from environment. Using default value ({rate_limiter_backoff_factor})."
-            )
-    else:
-        rate_limiter_backoff_factor = default_rate_limiter_backoff_factor
-        logging.info(
-            f"RATE_LIMITER_BACKOFF_FACTOR: Using default value ({rate_limiter_backoff_factor})."
-        )
-
-    default_rate_limiter_recovery_factor = 0.95
-    rate_limiter_recovery_factor_env = os.getenv("RATE_LIMITER_RECOVERY_FACTOR")
-    if rate_limiter_recovery_factor_env:
-        try:
-            rate_limiter_recovery_factor = float(rate_limiter_recovery_factor_env)
-            logging.info(
-                f"RATE_LIMITER_RECOVERY_FACTOR: Loaded from environment (value: {rate_limiter_recovery_factor})."
-            )
-        except ValueError:
-            rate_limiter_recovery_factor = default_rate_limiter_recovery_factor
-            logging.warning(
-                f"RATE_LIMITER_RECOVERY_FACTOR: Invalid value '{rate_limiter_recovery_factor_env}' from environment. Using default value ({rate_limiter_recovery_factor})."
-            )
-    else:
-        rate_limiter_recovery_factor = default_rate_limiter_recovery_factor
-        logging.info(
-            f"RATE_LIMITER_RECOVERY_FACTOR: Using default value ({rate_limiter_recovery_factor})."
-        )
-
-    default_rate_limiter_success_threshold = 20
-    rate_limiter_success_threshold_env = os.getenv("RATE_LIMITER_SUCCESS_THRESHOLD")
-    if rate_limiter_success_threshold_env:
-        try:
-            rate_limiter_success_threshold = int(rate_limiter_success_threshold_env)
-            logging.info(
-                f"RATE_LIMITER_SUCCESS_THRESHOLD: Loaded from environment (value: {rate_limiter_success_threshold})."
-            )
-        except ValueError:
-            rate_limiter_success_threshold = default_rate_limiter_success_threshold
-            logging.warning(
-                f"RATE_LIMITER_SUCCESS_THRESHOLD: Invalid value '{rate_limiter_success_threshold_env}' from environment. Using default value ({rate_limiter_success_threshold})."
-            )
-    else:
-        rate_limiter_success_threshold = default_rate_limiter_success_threshold
-        logging.info(
-            f"RATE_LIMITER_SUCCESS_THRESHOLD: Using default value ({rate_limiter_success_threshold})."
-        )
-
-    default_rate_limiter_recovery_cooldown = 30.0
-    rate_limiter_recovery_cooldown_env = os.getenv("RATE_LIMITER_RECOVERY_COOLDOWN")
-    if rate_limiter_recovery_cooldown_env:
-        try:
-            rate_limiter_recovery_cooldown = float(rate_limiter_recovery_cooldown_env)
-            logging.info(
-                f"RATE_LIMITER_RECOVERY_COOLDOWN: Loaded from environment (value: {rate_limiter_recovery_cooldown})."
-            )
-        except ValueError:
-            rate_limiter_recovery_cooldown = default_rate_limiter_recovery_cooldown
-            logging.warning(
-                f"RATE_LIMITER_RECOVERY_COOLDOWN: Invalid value '{rate_limiter_recovery_cooldown_env}' from environment. Using default value ({rate_limiter_recovery_cooldown})."
-            )
-    else:
-        rate_limiter_recovery_cooldown = default_rate_limiter_recovery_cooldown
-        logging.info(
-            f"RATE_LIMITER_RECOVERY_COOLDOWN: Using default value ({rate_limiter_recovery_cooldown})."
-        )
-
-    default_check_interval_seconds = 60
-    check_interval_seconds_env = os.getenv("CHECK_INTERVAL_SECONDS")
-    if check_interval_seconds_env:
-        try:
-            check_interval_seconds = int(check_interval_seconds_env)
-            logging.info(
-                f"CHECK_INTERVAL_SECONDS: Loaded from environment (value: {check_interval_seconds})."
-            )
-        except ValueError:
-            check_interval_seconds = default_check_interval_seconds
-            logging.warning(
-                f"CHECK_INTERVAL_SECONDS: Invalid value '{check_interval_seconds_env}' from environment. Using default value ({check_interval_seconds})."
-            )
-    else:
-        check_interval_seconds = default_check_interval_seconds
-        logging.info(
-            f"CHECK_INTERVAL_SECONDS: Using default value ({check_interval_seconds})."
-        )
-
-    default_max_transaction_age_days = 7
-    max_transaction_age_days_env = os.getenv("MAX_TRANSACTION_AGE_DAYS")
-    if max_transaction_age_days_env:
-        try:
-            max_transaction_age_days = int(max_transaction_age_days_env)
-            logging.info(
-                f"MAX_TRANSACTION_AGE_DAYS: Loaded from environment (value: {max_transaction_age_days})."
-            )
-        except ValueError:
-            max_transaction_age_days = default_max_transaction_age_days
-            logging.warning(
-                f"MAX_TRANSACTION_AGE_DAYS: Invalid value '{max_transaction_age_days_env}' from environment. Using default value ({max_transaction_age_days})."
-            )
-    else:
-        max_transaction_age_days = default_max_transaction_age_days
-        logging.info(
-            f"MAX_TRANSACTION_AGE_DAYS: Using default value ({max_transaction_age_days})."
-        )
-
-    default_max_transactions_per_check = 10
-    max_transactions_per_check_env = os.getenv("MAX_TRANSACTIONS_PER_CHECK")
-    if max_transactions_per_check_env:
-        try:
-            max_transactions_per_check = int(max_transactions_per_check_env)
-            logging.info(
-                f"MAX_TRANSACTIONS_PER_CHECK: Loaded from environment (value: {max_transactions_per_check})."
-            )
-        except ValueError:
-            max_transactions_per_check = default_max_transactions_per_check
-            logging.warning(
-                f"MAX_TRANSACTIONS_PER_CHECK: Invalid value '{max_transactions_per_check_env}' from environment. Using default value ({max_transactions_per_check})."
-            )
-    else:
-        max_transactions_per_check = default_max_transactions_per_check
-    logging.info(
-        f"MAX_TRANSACTIONS_PER_CHECK: Using default value ({max_transactions_per_check})."
+    rate_limiter_min_delay = _get_env_float("RATE_LIMITER_MIN_DELAY", 0.4)
+    rate_limiter_max_delay = _get_env_float("RATE_LIMITER_MAX_DELAY", 10.0)
+    rate_limiter_backoff_factor = _get_env_float("RATE_LIMITER_BACKOFF_FACTOR", 2.5)
+    rate_limiter_recovery_factor = _get_env_float("RATE_LIMITER_RECOVERY_FACTOR", 0.95)
+    rate_limiter_success_threshold = _get_env_int("RATE_LIMITER_SUCCESS_THRESHOLD", 20)
+    rate_limiter_recovery_cooldown = _get_env_float(
+        "RATE_LIMITER_RECOVERY_COOLDOWN", 30.0
     )
 
-    # Verbose logging option (global VERBOSE flag)
+    # Check interval and transaction settings
+    check_interval_seconds = _get_env_int("CHECK_INTERVAL_SECONDS", 60)
+    max_transaction_age_days = _get_env_int("MAX_TRANSACTION_AGE_DAYS", 7)
+    max_transactions_per_check = _get_env_int("MAX_TRANSACTIONS_PER_CHECK", 10)
+
+    # Verbose logging option
     verbose_env = os.getenv("VERBOSE", "").lower()
     verbose_logging = verbose_env in ("true", "1", "yes", "on")
-    if verbose_logging:
-        logging.info("VERBOSE: Enabled (DEBUG level logging).")
-    else:
-        logging.debug("VERBOSE: Disabled (INFO level logging).")
 
-    logging.info("--- Token Configuration Overrides ---")
-    # Create and return config instance
+    # Log all config details at DEBUG level
+    logging.debug(
+        f"Config: db={db_path}, api_url={etherscan_base_url}, "
+        f"delay={etherscan_request_delay}s, interval={check_interval_seconds}s, "
+        f"max_age={max_transaction_age_days}d, max_tx={max_transactions_per_check}"
+    )
+    logging.debug(
+        f"Rate limiter: min={rate_limiter_min_delay}s, max={rate_limiter_max_delay}s, "
+        f"backoff={rate_limiter_backoff_factor}x, recovery={rate_limiter_recovery_factor}, "
+        f"threshold={rate_limiter_success_threshold}, cooldown={rate_limiter_recovery_cooldown}s"
+    )
+
+    # Create config instance
     config = BotConfig(
         telegram_bot_token=telegram_bot_token,
         etherscan_api_key=etherscan_api_key,
@@ -388,88 +225,49 @@ def load_config() -> BotConfig:
         verbose_logging=verbose_logging,
     )
 
-    # Override token configurations if specified in environment
-    usdt_contract_address_env = os.getenv("USDT_CONTRACT_ADDRESS")
+    # Token configuration overrides
+    env_overrides = []
+
+    # USDT overrides
+    usdt_contract = os.getenv("USDT_CONTRACT_ADDRESS")
     usdt_decimals_env = os.getenv("USDT_DECIMALS")
-    default_usdt_contract = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-    default_usdt_decimals = 6
-
-    final_usdt_contract = default_usdt_contract
-    source_usdt_contract = "default"
-    if usdt_contract_address_env:
-        final_usdt_contract = usdt_contract_address_env
-        source_usdt_contract = "environment"
-    logging.info(
-        f"USDT_CONTRACT_ADDRESS: Using {source_usdt_contract} value ('{final_usdt_contract}')."
-    )
-
-    final_usdt_decimals = default_usdt_decimals
-    source_usdt_decimals = "default"
-    if usdt_decimals_env:
-        try:
-            final_usdt_decimals = int(usdt_decimals_env)
-            source_usdt_decimals = "environment"
-        except ValueError:
-            logging.warning(
-                f"USDT_DECIMALS: Invalid value '{usdt_decimals_env}' from environment. Using default value ({final_usdt_decimals})."
-            )
-    logging.info(
-        f"USDT_DECIMALS: Using {source_usdt_decimals} value ({final_usdt_decimals})."
-    )
-
-    if (
-        usdt_contract_address_env or usdt_decimals_env
-    ):  # Only re-register if an override was attempted
+    if usdt_contract or usdt_decimals_env:
+        final_contract = usdt_contract or "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+        final_decimals = _get_env_int("USDT_DECIMALS", 6)
         usdt_config = TokenConfig(
             name="Tether USD",
-            contract_address=final_usdt_contract,
-            decimals=final_usdt_decimals,
+            contract_address=final_contract,
+            decimals=final_decimals,
             symbol="USDT",
             display_name="USDT",
-            explorer_url=f"https://etherscan.io/token/{final_usdt_contract}",
+            explorer_url=f"https://etherscan.io/token/{final_contract}",
         )
-        config.token_registry.register_token(usdt_config)  # Overwrites the default one
+        config.token_registry.register_token(usdt_config)
+        env_overrides.append("USDT")
 
-    usdc_contract_address_env = os.getenv("USDC_CONTRACT_ADDRESS")
+    # USDC overrides
+    usdc_contract = os.getenv("USDC_CONTRACT_ADDRESS")
     usdc_decimals_env = os.getenv("USDC_DECIMALS")
-    default_usdc_contract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    default_usdc_decimals = 6
-
-    final_usdc_contract = default_usdc_contract
-    source_usdc_contract = "default"
-    if usdc_contract_address_env:
-        final_usdc_contract = usdc_contract_address_env
-        source_usdc_contract = "environment"
-    logging.info(
-        f"USDC_CONTRACT_ADDRESS: Using {source_usdc_contract} value ('{final_usdc_contract}')."
-    )
-
-    final_usdc_decimals = default_usdc_decimals
-    source_usdc_decimals = "default"
-    if usdc_decimals_env:
-        try:
-            final_usdc_decimals = int(usdc_decimals_env)
-            source_usdc_decimals = "environment"
-        except ValueError:
-            logging.warning(
-                f"USDC_DECIMALS: Invalid value '{usdc_decimals_env}' from environment. Using default value ({final_usdc_decimals})."
-            )
-    logging.info(
-        f"USDC_DECIMALS: Using {source_usdc_decimals} value ({final_usdc_decimals})."
-    )
-
-    if (
-        usdc_contract_address_env or usdc_decimals_env
-    ):  # Only re-register if an override was attempted
+    if usdc_contract or usdc_decimals_env:
+        final_contract = usdc_contract or "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        final_decimals = _get_env_int("USDC_DECIMALS", 6)
         usdc_config = TokenConfig(
             name="USD Coin",
-            contract_address=final_usdc_contract,
-            decimals=final_usdc_decimals,
+            contract_address=final_contract,
+            decimals=final_decimals,
             symbol="USDC",
             display_name="USDC",
-            explorer_url=f"https://etherscan.io/token/{final_usdc_contract}",
+            explorer_url=f"https://etherscan.io/token/{final_contract}",
         )
-        config.token_registry.register_token(usdc_config)  # Overwrites the default one
+        config.token_registry.register_token(usdc_config)
+        env_overrides.append("USDC")
 
-    logging.info("--- Configuration Loading Complete ---")
+    # Single INFO log for config summary
+    tokens = list(config.token_registry.get_all_tokens().keys())
+    override_info = f", overrides: {env_overrides}" if env_overrides else ""
+    logging.info(
+        f"Config loaded: interval={check_interval_seconds}s, "
+        f"tokens={tokens}{override_info}, verbose={verbose_logging}"
+    )
+
     return config
