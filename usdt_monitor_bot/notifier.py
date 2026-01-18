@@ -146,7 +146,7 @@ class NotificationService:
                 )
                 return message
             except Exception as e:
-                logging.debug(f"Message build error: {e}")
+                logging.warning(f"Message build error: {e}", exc_info=True)
                 return None
 
         except Exception as e:
