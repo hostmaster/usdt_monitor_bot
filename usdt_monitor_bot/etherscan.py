@@ -504,5 +504,5 @@ class EtherscanClient:
             except (aiohttp.ClientError, RuntimeError) as e:
                 logging.debug(f"Session close: {e}")
             except Exception as e:
-                logging.debug(f"Session close error: {e}")
+                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
         self._session = None
