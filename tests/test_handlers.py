@@ -235,3 +235,104 @@ async def test_other_message(mock_message: AsyncMock):
     mock_message.text = "hello bot"
     await other_message_handler(mock_message)
     mock_message.reply.assert_awaited_once_with(messages.ERROR_UNKNOWN_COMMAND)
+
+
+# --- Tests for Missing from_user ---
+
+
+async def test_command_start_no_user(
+    mock_message: AsyncMock, mock_db_manager: AsyncMock
+):
+    """Test /start handler when from_user is None."""
+    mock_message.from_user = None
+
+    await command_start_handler(mock_message, mock_db_manager)
+
+    # Should return early without any action
+    mock_db_manager.check_user_exists.assert_not_awaited()
+    mock_db_manager.add_user.assert_not_awaited()
+    mock_message.answer.assert_not_awaited()
+
+
+async def test_add_wallet_no_user(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    """Test /add handler when from_user is None."""
+    mock_message.from_user = None
+    mock_command_object.args = VALID_ADDRESS
+
+    await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    # Should return early without any action
+    mock_db_manager.add_wallet.assert_not_awaited()
+    mock_message.reply.assert_not_awaited()
+
+
+async def test_list_wallets_no_user(
+    mock_message: AsyncMock, mock_db_manager: AsyncMock
+):
+    """Test /list handler when from_user is None."""
+    mock_message.from_user = None
+
+    await list_wallets_handler(mock_message, mock_db_manager)
+
+    # Should return early without any action
+    mock_db_manager.list_wallets.assert_not_awaited()
+    mock_message.reply.assert_not_awaited()
+
+
+async def test_remove_wallet_no_user(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    """Test /remove handler when from_user is None."""
+    mock_message.from_user = None
+    mock_command_object.args = VALID_ADDRESS
+
+    await remove_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    # Should return early without any action
+    mock_db_manager.remove_wallet.assert_not_awaited()
+    mock_message.reply.assert_not_awaited()
+
+
+# --- Tests for Edge Cases in Handler Arguments ---
+
+
+async def test_add_wallet_with_none_args(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    """Test /add handler with None args."""
+    mock_command_object.args = None
+
+    await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    mock_db_manager.add_wallet.assert_not_awaited()
+    mock_message.reply.assert_awaited_once_with(messages.add_wallet_missing_address())
+
+
+async def test_remove_wallet_with_whitespace_only(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    """Test /remove handler with whitespace-only args."""
+    mock_command_object.args = "   \t\n  "
+
+    await remove_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    mock_db_manager.remove_wallet.assert_not_awaited()
+    mock_message.reply.assert_awaited_once_with(
+        messages.remove_wallet_missing_address()
+    )
+
+
+async def test_add_wallet_address_case_preserved_in_response(
+    mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
+):
+    """Test that add_wallet response shows lowercase address."""
+    mock_command_object.args = VALID_ADDRESS_UPPER
+    mock_db_manager.add_wallet.return_value = WalletAddResult.ADDED
+
+    await add_wallet_handler(mock_message, mock_command_object, mock_db_manager)
+
+    # Should use lowercase in response
+    expected_message = messages.add_wallet_success(VALID_ADDRESS_UPPER.lower())
+    mock_message.reply.assert_awaited_once_with(expected_message)

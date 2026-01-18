@@ -73,34 +73,7 @@ def mock_response():
     return response
 
 
-class MockClientSession:
-    """Mock aiohttp.ClientSession for testing."""
-
-    def __init__(self, timeout=None):
-        self.timeout = timeout
-        self._closed = False
-        self._response = None
-
-    async def __aenter__(self):
-        return self._response
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self._closed = True
-
-    def get(self, *args, **kwargs):
-        """Return a context manager that yields the response."""
-        return self
-
-    def set_response(self, response):
-        """Set the response to be returned by the context manager."""
-        self._response = response
-
-    async def close(self):
-        """Close the session."""
-        self._closed = True
-
-
-# New fixture to use mock_aiohttp_session from conftest.py
+# Fixture to use mock_aiohttp_session from conftest.py
 @pytest.fixture
 async def etherscan_client_with_mocked_session(
     mock_config, mock_aiohttp_session, monkeypatch
