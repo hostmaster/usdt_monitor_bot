@@ -189,6 +189,23 @@ class SpamDetector:
             matching_chars=prefix_matches + suffix_matches,
         )
 
+    @staticmethod
+    def _create_whitelisted_result(reason: str, details: dict) -> RiskAnalysis:
+        """Create a RiskAnalysis result for whitelisted transactions."""
+        return RiskAnalysis(
+            score=0,
+            flags=[],
+            is_suspicious=False,
+            similarity_score=0,
+            recommendation=f"✅ {reason}",
+            details={"whitelisted": True, **details},
+        )
+
+    @staticmethod
+    def _normalize_address(addr: str) -> str:
+        """Normalize an Ethereum address for comparison (lowercase, no 0x prefix)."""
+        return addr.lower().replace("0x", "")
+
     def analyze_transaction(
         self,
         tx: TransactionMetadata,
@@ -212,58 +229,39 @@ class SpamDetector:
         Returns:
             RiskAnalysis with score, flags, and recommendation
         """
-        # Normalize whitelist addresses for comparison
-        whitelist_normalized = set()
-        if whitelisted_addresses:
-            for addr in whitelisted_addresses:
-                # Normalize: lowercase, remove 0x prefix
-                normalized = addr.lower().replace("0x", "")
-                if len(normalized) == 40:  # Valid Ethereum address length
-                    whitelist_normalized.add(normalized)
+        # Normalize addresses for comparison
+        tx_from_normalized = self._normalize_address(tx.from_address)
+        tx_to_normalized = self._normalize_address(tx.to_address)
 
-        # Normalize monitored address
-        monitored_normalized = None
-        if monitored_address:
-            monitored_normalized = monitored_address.lower().replace("0x", "")
+        whitelist_normalized = {
+            self._normalize_address(addr)
+            for addr in (whitelisted_addresses or [])
+            if len(self._normalize_address(addr)) == 40  # Valid Ethereum address
+        }
 
-        # Check if transaction involves a whitelisted address
-        tx_from_normalized = tx.from_address.lower().replace("0x", "")
-        tx_to_normalized = tx.to_address.lower().replace("0x", "")
+        monitored_normalized = (
+            self._normalize_address(monitored_address) if monitored_address else None
+        )
 
         # Whitelist logic:
         # 1. If FROM is in whitelist (token contracts) -> whitelist
         # 2. If TO is in whitelist (token contracts) -> whitelist
         # 3. If FROM is the monitored address -> whitelist (outgoing from user)
         # 4. If TO is the monitored address AND FROM is not whitelisted -> DO NOT whitelist (incoming spam check)
-        if whitelist_normalized:
-            if tx_from_normalized in whitelist_normalized:
-                return RiskAnalysis(
-                    score=0,
-                    flags=[],
-                    is_suspicious=False,
-                    similarity_score=0,
-                    recommendation="✅ Whitelisted sender address - Low risk transaction",
-                    details={"whitelisted": True, "whitelisted_from": True},
-                )
-            if tx_to_normalized in whitelist_normalized:
-                return RiskAnalysis(
-                    score=0,
-                    flags=[],
-                    is_suspicious=False,
-                    similarity_score=0,
-                    recommendation="✅ Whitelisted recipient address - Low risk transaction",
-                    details={"whitelisted": True, "whitelisted_to": True},
-                )
-
-        # Check monitored address separately - only whitelist outgoing transactions
+        if tx_from_normalized in whitelist_normalized:
+            return self._create_whitelisted_result(
+                "Whitelisted sender address - Low risk transaction",
+                {"whitelisted_from": True},
+            )
+        if tx_to_normalized in whitelist_normalized:
+            return self._create_whitelisted_result(
+                "Whitelisted recipient address - Low risk transaction",
+                {"whitelisted_to": True},
+            )
         if monitored_normalized and tx_from_normalized == monitored_normalized:
-            return RiskAnalysis(
-                score=0,
-                flags=[],
-                is_suspicious=False,
-                similarity_score=0,
-                recommendation="✅ Outgoing transaction from monitored address - Low risk",
-                details={"whitelisted": True, "outgoing_from_monitored": True},
+            return self._create_whitelisted_result(
+                "Outgoing transaction from monitored address - Low risk",
+                {"outgoing_from_monitored": True},
             )
 
         score = 0
