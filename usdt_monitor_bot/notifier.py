@@ -128,7 +128,7 @@ class NotificationService:
                     )
                     return message
                 except Exception as e:
-                    logging.debug(f"Spam notice build error: {e}")
+                    logging.warning(f"Spam notice build error: {e}", exc_info=True)
                     return None
 
             # Normal transaction - full details
