@@ -150,7 +150,7 @@ class NotificationService:
                 return None
 
         except Exception as e:
-            logging.debug(f"Format tx error {tx_hash[:16]}: {e}")
+            logging.error(f"Format tx error {tx_hash}: {e}", exc_info=True)
             return None
 
     async def send_token_notification(
