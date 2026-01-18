@@ -1,12 +1,14 @@
 # tests/test_notifier.py
-from unittest.mock import AsyncMock, MagicMock  # Import MagicMock
+import logging
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiogram.exceptions import TelegramAPIError
 
 from usdt_monitor_bot.config import BotConfig, TokenConfig
-
-# Import exceptions correctly
 from usdt_monitor_bot.notifier import NotificationService
+from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
 
 pytestmark = pytest.mark.asyncio
 
@@ -333,8 +335,6 @@ async def test_send_token_notification_spam_short_notice(
     notifier: NotificationService, mock_telegram_bot
 ):
     """Test that spam transactions send a short notice instead of full details."""
-    from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
-
     monitored_address_val = TX1_INCOMING_USDT["to"]
     spam_tx = TX1_INCOMING_USDT.copy()
 
@@ -364,3 +364,203 @@ async def test_send_token_notification_spam_short_notice(
     assert "Time:" not in message
     assert "View on Etherscan" not in message  # Should be just "View"
     assert "View" in message  # Short link text
+
+
+# --- Tests for Edge Cases and Error Handling ---
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_empty_tx(
+    notifier: NotificationService, mock_telegram_bot, caplog
+):
+    """Test that empty transaction data is handled gracefully."""
+    with caplog.at_level(logging.WARNING):
+        await notifier.send_token_notification(
+            USER1, {}, "USDT", ADDR1
+        )
+
+    mock_telegram_bot.send_message.assert_not_called()
+    assert "empty transaction data" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_none_tx(
+    notifier: NotificationService, mock_telegram_bot, caplog
+):
+    """Test that None transaction is handled gracefully."""
+    with caplog.at_level(logging.WARNING):
+        await notifier.send_token_notification(
+            USER1, None, "USDT", ADDR1
+        )
+
+    mock_telegram_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_invalid_user_id(
+    notifier: NotificationService, mock_telegram_bot, caplog
+):
+    """Test that invalid user_id is handled gracefully."""
+    with caplog.at_level(logging.WARNING):
+        # Zero user_id
+        await notifier.send_token_notification(
+            0, TX1_INCOMING_USDT, "USDT", ADDR1
+        )
+        mock_telegram_bot.send_message.assert_not_called()
+
+        # Negative user_id
+        await notifier.send_token_notification(
+            -1, TX1_INCOMING_USDT, "USDT", ADDR1
+        )
+        mock_telegram_bot.send_message.assert_not_called()
+
+    assert "Invalid user_id" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_send_token_notification_telegram_api_error(
+    notifier: NotificationService, mock_telegram_bot, caplog
+):
+    """Test handling of Telegram API errors during message sending."""
+    mock_telegram_bot.send_message.side_effect = TelegramAPIError(
+        method="sendMessage", message="Chat not found"
+    )
+
+    with caplog.at_level(logging.ERROR):
+        await notifier.send_token_notification(
+            USER1, TX1_INCOMING_USDT, "USDT", ADDR1
+        )
+
+    assert "Failed to send message" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_missing_tx_hash(notifier: NotificationService):
+    """Test that missing tx_hash returns None."""
+    result = notifier._format_token_message(
+        tx_hash=None,
+        address="0xsender",
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_invalid_tx_hash_format(
+    notifier: NotificationService,
+):
+    """Test that tx_hash without 0x prefix returns None."""
+    result = notifier._format_token_message(
+        tx_hash="abc123",  # No 0x prefix
+        address="0xsender",
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_invalid_address_format(
+    notifier: NotificationService,
+):
+    """Test that address without 0x prefix returns None."""
+    result = notifier._format_token_message(
+        tx_hash="0x123",
+        address="sender123",  # No 0x prefix
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_negative_value(notifier: NotificationService):
+    """Test that negative value returns None."""
+    result = notifier._format_token_message(
+        tx_hash="0x123",
+        address="0xsender",
+        value=-100.0,  # Negative value
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=1620000000,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_future_timestamp(notifier: NotificationService):
+    """Test that far future timestamp returns None."""
+    # Timestamp 2 hours in the future (beyond allowed tolerance)
+    future_ts = int(datetime.now(timezone.utc).timestamp()) + 7200
+
+    result = notifier._format_token_message(
+        tx_hash="0x123",
+        address="0xsender",
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=future_ts,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_negative_timestamp(notifier: NotificationService):
+    """Test that negative timestamp returns None."""
+    result = notifier._format_token_message(
+        tx_hash="0x123",
+        address="0xsender",
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp=-1,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_token_message_non_integer_timestamp(
+    notifier: NotificationService,
+):
+    """Test that non-integer timestamp returns None."""
+    result = notifier._format_token_message(
+        tx_hash="0x123",
+        address="0xsender",
+        value=1.0,
+        token_config=notifier._config.token_registry.get_token("USDT"),
+        is_incoming=True,
+        timestamp="not-a-timestamp",
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_send_notification_case_insensitive_address_comparison(
+    notifier: NotificationService, mock_telegram_bot
+):
+    """Test that address comparisons are case-insensitive."""
+    # Use uppercase in monitored address, lowercase in tx
+    monitored_upper = "0x1234567890123456789012345678901234567890".upper()
+    tx = {
+        "hash": "0x123",
+        "from": "0xsender",
+        "to": monitored_upper.lower(),  # lowercase in tx
+        "value": "1000000",
+        "timeStamp": "1620000000",
+    }
+
+    await notifier.send_token_notification(
+        USER1, tx, "USDT", monitored_upper  # uppercase
+    )
+
+    mock_telegram_bot.send_message.assert_called_once()
+    message = mock_telegram_bot.send_message.call_args[1]["text"]
+    # Should be detected as incoming (to monitored address)
+    assert "From:" in message

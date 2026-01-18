@@ -1,4 +1,5 @@
 # tests/test_checker.py
+import logging
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, AsyncMock, MagicMock
 
@@ -8,9 +9,11 @@ from usdt_monitor_bot.checker import TransactionChecker
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
     EtherscanClient,
+    EtherscanError,
     EtherscanRateLimitError,
 )
 from usdt_monitor_bot.notifier import NotificationService
+from usdt_monitor_bot.spam_detector import SpamDetector
 
 pytestmark = pytest.mark.asyncio
 
@@ -565,3 +568,308 @@ async def test_determine_next_block_latest_block_none_with_transactions(
     assert result.final_block_number == new_last_block
     assert result.resetting_to_latest is False
     mock_etherscan.get_latest_block_number.assert_awaited_once()
+
+
+# --- Tests for Spam Detection Disabled ---
+
+
+async def test_spam_detection_disabled(
+    mock_config: MagicMock,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """Test that spam detection can be disabled."""
+    checker = TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    checker._spam_detection_enabled = False
+
+    tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_etherscan.get_token_transactions.side_effect = [[tx], []]
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+
+    await checker.check_all_addresses()
+
+    # Notification should be sent without risk_analysis
+    mock_notifier.send_token_notification.assert_awaited_once()
+    # When spam detection is disabled, risk_analysis should be None
+    call_args = mock_notifier.send_token_notification.call_args
+    assert call_args[0][4] is None  # risk_analysis argument
+
+
+async def test_spam_detection_with_custom_detector(
+    mock_config: MagicMock,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """Test that custom spam detector can be injected."""
+    custom_detector = SpamDetector(config={"suspicious_score_threshold": 100})
+    checker = TransactionChecker(
+        mock_config, mock_db, mock_etherscan, mock_notifier, spam_detector=custom_detector
+    )
+
+    assert checker._spam_detector is custom_detector
+
+
+# --- Tests for Error Handling ---
+
+
+async def test_handle_etherscan_error_no_transactions_found(
+    checker: TransactionChecker, caplog
+):
+    """Test that 'No transactions found' errors are silently ignored."""
+    error = EtherscanError("No transactions found")
+    checker._handle_etherscan_error(error, "USDT", ADDR1)
+
+    # Should not log anything for "No transactions found"
+    assert "No transactions found" not in caplog.text
+
+
+async def test_handle_etherscan_error_notok(checker: TransactionChecker, caplog):
+    """Test that NOTOK errors are logged as warnings."""
+    with caplog.at_level(logging.WARNING):
+        error = EtherscanError("API error: NOTOK - query timeout")
+        checker._handle_etherscan_error(error, "USDT", ADDR1)
+
+    assert "NOTOK" in caplog.text or "query timeout" in caplog.text
+
+
+async def test_handle_etherscan_error_unexpected(checker: TransactionChecker, caplog):
+    """Test that unexpected errors are logged with full traceback."""
+    with caplog.at_level(logging.ERROR):
+        error = RuntimeError("Something unexpected happened")
+        checker._handle_etherscan_error(error, "USDT", ADDR1)
+
+    assert "Unexpected error" in caplog.text
+
+
+# --- Tests for Transaction Metadata Conversion ---
+
+
+async def test_convert_to_transaction_metadata_missing_fields(
+    checker: TransactionChecker, caplog
+):
+    """Test that transactions with missing required fields return None."""
+    with caplog.at_level(logging.WARNING):
+        # Missing hash
+        tx_no_hash = {"from": "0xsender", "to": "0xrecipient", "value": "1000000"}
+        result = checker._convert_to_transaction_metadata(tx_no_hash, 6)
+        assert result is None
+
+        # Missing from address
+        tx_no_from = {"hash": "0x123", "to": "0xrecipient", "value": "1000000"}
+        result = checker._convert_to_transaction_metadata(tx_no_from, 6)
+        assert result is None
+
+        # Missing to address
+        tx_no_to = {"hash": "0x123", "from": "0xsender", "value": "1000000"}
+        result = checker._convert_to_transaction_metadata(tx_no_to, 6)
+        assert result is None
+
+
+async def test_convert_to_transaction_metadata_invalid_timestamp(
+    checker: TransactionChecker, caplog
+):
+    """Test that transactions with invalid timestamps return None."""
+    with caplog.at_level(logging.WARNING):
+        tx = {
+            "hash": "0x123",
+            "from": "0xsender",
+            "to": "0xrecipient",
+            "value": "1000000",
+            "timeStamp": "not-a-timestamp",
+            "blockNumber": "1000",
+        }
+        result = checker._convert_to_transaction_metadata(tx, 6)
+        assert result is None
+        assert "Invalid timestamp" in caplog.text
+
+
+async def test_convert_to_transaction_metadata_invalid_value(
+    checker: TransactionChecker, caplog
+):
+    """Test that transactions with invalid values return None."""
+    with caplog.at_level(logging.ERROR):
+        tx = {
+            "hash": "0x123",
+            "from": "0xsender",
+            "to": "0xrecipient",
+            "value": "not-a-number",
+            "timeStamp": str(NOW_TS),
+            "blockNumber": "1000",
+        }
+        result = checker._convert_to_transaction_metadata(tx, 6)
+        assert result is None
+        # The error is caught by the outer exception handler
+        assert "Error converting transaction to metadata" in caplog.text
+
+
+# --- Tests for Timestamp Parsing ---
+
+
+async def test_parse_timestamp_iso_format(checker: TransactionChecker):
+    """Test parsing ISO format timestamps."""
+    result = checker._parse_timestamp("2025-01-27T12:00:00+00:00")
+    assert result is not None
+    assert result.year == 2025
+    assert result.month == 1
+    assert result.day == 27
+
+
+async def test_parse_timestamp_unix_format(checker: TransactionChecker):
+    """Test parsing Unix timestamp strings."""
+    result = checker._parse_timestamp("1620000000")
+    assert result is not None
+    # May 3, 2021
+    assert result.year == 2021
+
+
+async def test_parse_timestamp_invalid_format(checker: TransactionChecker, caplog):
+    """Test that invalid timestamp formats return None."""
+    with caplog.at_level(logging.WARNING):
+        result = checker._parse_timestamp("invalid-timestamp")
+        assert result is None
+        assert "Invalid timestamp format" in caplog.text
+
+
+# --- Tests for Filter Transactions ---
+
+
+async def test_filter_transactions_sorts_by_block_chronologically(
+    checker: TransactionChecker,
+):
+    """Test that filtered transactions are sorted chronologically (oldest first)."""
+    transactions = [
+        create_mock_tx(1003, "s", "r", USDT_CONTRACT),
+        create_mock_tx(1001, "s", "r", USDT_CONTRACT),
+        create_mock_tx(1002, "s", "r", USDT_CONTRACT),
+    ]
+
+    result = checker._filter_transactions(transactions, 1000)
+
+    assert len(result) == 3
+    # Should be sorted chronologically (oldest first for processing)
+    assert int(result[0]["blockNumber"]) == 1001
+    assert int(result[1]["blockNumber"]) == 1002
+    assert int(result[2]["blockNumber"]) == 1003
+
+
+async def test_filter_transactions_excludes_at_or_below_start_block(
+    checker: TransactionChecker,
+):
+    """Test that transactions at or below start_block are excluded."""
+    transactions = [
+        create_mock_tx(999, "s", "r", USDT_CONTRACT),  # Below
+        create_mock_tx(1000, "s", "r", USDT_CONTRACT),  # Equal
+        create_mock_tx(1001, "s", "r", USDT_CONTRACT),  # Above
+    ]
+
+    result = checker._filter_transactions(transactions, 1000)
+
+    assert len(result) == 1
+    assert int(result[0]["blockNumber"]) == 1001
+
+
+# --- Tests for No Users Tracking Address ---
+
+
+async def test_transactions_found_but_no_users_tracking(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+    caplog,
+):
+    """Test behavior when transactions are found but no users track the address."""
+    tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db.get_users_for_address.return_value = []  # No users tracking
+    mock_etherscan.get_token_transactions.side_effect = [[tx], []]
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+
+    with caplog.at_level(logging.WARNING):
+        await checker.check_all_addresses()
+
+    # No notifications should be sent
+    mock_notifier.send_token_notification.assert_not_awaited()
+    # Warning should be logged
+    assert "no users are tracking it" in caplog.text
+
+
+# --- Tests for Process Single Transaction Errors ---
+
+
+async def test_process_transaction_missing_hash_or_symbol(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_notifier: AsyncMock,
+    caplog,
+):
+    """Test that transactions missing hash or symbol are skipped."""
+    mock_db.get_recent_transactions.return_value = []
+
+    with caplog.at_level(logging.WARNING):
+        # Missing hash
+        tx_no_hash = {"token_symbol": "USDT", "from": "s", "to": "r"}
+        result = await checker._process_single_transaction(
+            tx_no_hash, [USER1], ADDR1.lower(), []
+        )
+        assert result == 0
+
+        # Missing token_symbol
+        tx_no_symbol = {"hash": "0x123", "from": "s", "to": "r"}
+        result = await checker._process_single_transaction(
+            tx_no_symbol, [USER1], ADDR1.lower(), []
+        )
+        assert result == 0
+
+
+# --- Tests for Contract Age Caching ---
+
+
+async def test_contract_age_blocks_caching(
+    checker: TransactionChecker,
+    mock_etherscan: AsyncMock,
+):
+    """Test that contract creation blocks are cached."""
+    contract_address = "0xcontract123"
+    current_block = 1000
+    creation_block = 500
+
+    mock_etherscan.get_contract_creation_block.return_value = creation_block
+
+    # First call - should fetch from Etherscan
+    age1 = await checker._get_contract_age_blocks(contract_address, current_block)
+    assert age1 == 500  # 1000 - 500
+
+    # Second call - should use cache
+    age2 = await checker._get_contract_age_blocks(contract_address, current_block + 100)
+    assert age2 == 600  # 1100 - 500
+
+    # Etherscan should only be called once
+    mock_etherscan.get_contract_creation_block.assert_awaited_once()
+
+
+async def test_contract_age_blocks_error_cached_as_none(
+    checker: TransactionChecker,
+    mock_etherscan: AsyncMock,
+):
+    """Test that errors are cached to avoid repeated failed calls."""
+    contract_address = "0xcontract456"
+
+    mock_etherscan.get_contract_creation_block.side_effect = Exception("API Error")
+
+    # First call - should attempt fetch and fail
+    age1 = await checker._get_contract_age_blocks(contract_address, 1000)
+    assert age1 == 0  # Default on error
+
+    # Second call - should use cached None
+    age2 = await checker._get_contract_age_blocks(contract_address, 1000)
+    assert age2 == 0
+
+    # Etherscan should only be called once
+    mock_etherscan.get_contract_creation_block.assert_awaited_once()

@@ -1,14 +1,11 @@
 # tests/test_database.py
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from usdt_monitor_bot.database import DatabaseManager, WalletAddResult
 
 pytestmark = pytest.mark.asyncio
-
-
-async def test_init_db(memory_db_manager: DatabaseManager):
-    # Fixture handles init, test just ensures it runs without error implicitly
-    pass
 
 
 async def test_add_and_check_user(memory_db_manager: DatabaseManager):
@@ -311,8 +308,6 @@ async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
     await memory_db_manager.add_user(4, "user4", "U", "4")
     await memory_db_manager.add_wallet(4, monitored_addr)
 
-    from datetime import datetime, timedelta, timezone
-
     # Store old transaction (35 days ago)
     old_timestamp = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
     await memory_db_manager.store_transaction(
@@ -433,3 +428,195 @@ async def test_init_db_idempotent(memory_db_manager: DatabaseManager):
     await memory_db_manager.add_user(6, "user6", "U", "6")
     user_exists = await memory_db_manager.check_user_exists(6)
     assert user_exists is True
+
+
+# --- Tests for Error Handling and Edge Cases ---
+
+
+async def test_list_wallets_returns_empty_list_for_nonexistent_user(
+    memory_db_manager: DatabaseManager,
+):
+    """Test that list_wallets returns empty list for user with no wallets."""
+    # User doesn't exist yet
+    wallets = await memory_db_manager.list_wallets(999999)
+    assert wallets == []
+
+
+async def test_remove_wallet_nonexistent_returns_zero(
+    memory_db_manager: DatabaseManager,
+):
+    """Test that removing a non-existent wallet returns 0."""
+    user_id = 111
+    await memory_db_manager.add_user(user_id, "u111", "U", "111")
+
+    # Try to remove wallet that was never added
+    result = await memory_db_manager.remove_wallet(
+        user_id, "0x9999999999999999999999999999999999999999"
+    )
+    assert result == 0
+
+
+async def test_get_users_for_address_nonexistent_returns_empty(
+    memory_db_manager: DatabaseManager,
+):
+    """Test that getting users for non-tracked address returns empty list."""
+    users = await memory_db_manager.get_users_for_address(
+        "0xnonexistent000000000000000000000000000000"
+    )
+    assert users == []
+
+
+async def test_store_transaction_duplicate_replaces(memory_db_manager: DatabaseManager):
+    """Test that storing a transaction with same hash replaces the old one."""
+    monitored_addr = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    await memory_db_manager.add_user(1, "user1", "U", "1")
+    await memory_db_manager.add_wallet(1, monitored_addr)
+
+    # Store first version
+    await memory_db_manager.store_transaction(
+        tx_hash="0xduplicate",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=100.0,
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+        risk_score=50,
+    )
+
+    # Store updated version with same hash
+    await memory_db_manager.store_transaction(
+        tx_hash="0xduplicate",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=200.0,  # Different value
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+        risk_score=75,  # Different risk score
+    )
+
+    # Should only have one transaction with updated values
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=10)
+    assert len(recent) == 1
+    assert recent[0]["value"] == 200.0
+    assert recent[0]["risk_score"] == 75
+
+
+async def test_get_recent_transactions_empty_address(memory_db_manager: DatabaseManager):
+    """Test that getting transactions for address with no history returns empty."""
+    monitored_addr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    await memory_db_manager.add_user(2, "user2", "U", "2")
+    await memory_db_manager.add_wallet(2, monitored_addr)
+
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=10)
+    assert recent == []
+
+
+async def test_is_new_sender_case_insensitive(memory_db_manager: DatabaseManager):
+    """Test that sender address comparison is case-insensitive."""
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    sender_lower = "0x1111111111111111111111111111111111111111"
+    sender_upper = "0x1111111111111111111111111111111111111111".upper()
+
+    await memory_db_manager.add_user(3, "user3", "U", "3")
+    await memory_db_manager.add_wallet(3, monitored_addr)
+
+    # Store with lowercase sender
+    await memory_db_manager.store_transaction(
+        tx_hash="0x111",
+        monitored_address=monitored_addr,
+        from_address=sender_lower,
+        to_address=monitored_addr,
+        value=100.0,
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+    )
+
+    # Check with uppercase - should still find it
+    is_new = await memory_db_manager.is_new_sender_address(monitored_addr, sender_upper)
+    assert is_new is False
+
+
+async def test_cleanup_old_transactions_none_to_clean(
+    memory_db_manager: DatabaseManager,
+):
+    """Test cleanup when there are no old transactions."""
+    monitored_addr = "0xdddddddddddddddddddddddddddddddddddddddd"
+    await memory_db_manager.add_user(4, "user4", "U", "4")
+    await memory_db_manager.add_wallet(4, monitored_addr)
+
+    # Store only recent transaction
+    recent_timestamp = datetime.now(timezone.utc).isoformat()
+    await memory_db_manager.store_transaction(
+        tx_hash="0xrecent",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=100.0,
+        block_number=1000,
+        timestamp=recent_timestamp,
+        token_symbol="USDT",
+    )
+
+    # Cleanup should return 0 (nothing deleted)
+    deleted = await memory_db_manager.cleanup_old_transactions(days_to_keep=30)
+    assert deleted == 0
+
+
+async def test_update_last_checked_block_creates_if_not_exists(
+    memory_db_manager: DatabaseManager,
+):
+    """Test that updating block creates entry if address doesn't exist in tracked_addresses."""
+    new_addr = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+    # Update block for address not in tracked_addresses
+    result = await memory_db_manager.update_last_checked_block(new_addr, 5000)
+    assert result > 0
+
+    # Should be able to retrieve the block
+    block = await memory_db_manager.get_last_checked_block(new_addr)
+    assert block == 5000
+
+
+async def test_add_wallet_case_normalization(memory_db_manager: DatabaseManager):
+    """Test that wallet addresses are normalized to lowercase."""
+    user_id = 5
+    addr_upper = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+    await memory_db_manager.add_user(user_id, "u5", "U", "5")
+    result = await memory_db_manager.add_wallet(user_id, addr_upper)
+    assert result == WalletAddResult.ADDED
+
+    # List should return lowercase
+    wallets = await memory_db_manager.list_wallets(user_id)
+    assert wallets == [addr_upper.lower()]
+
+
+async def test_store_transaction_with_null_risk_score(
+    memory_db_manager: DatabaseManager,
+):
+    """Test storing transaction without risk score (None)."""
+    monitored_addr = "0xffffffffffffffffffffffffffffffffffff0001"
+    await memory_db_manager.add_user(6, "user6", "U", "6")
+    await memory_db_manager.add_wallet(6, monitored_addr)
+
+    stored = await memory_db_manager.store_transaction(
+        tx_hash="0xnullrisk",
+        monitored_address=monitored_addr,
+        from_address="0x1111111111111111111111111111111111111111",
+        to_address="0x2222222222222222222222222222222222222222",
+        value=100.0,
+        block_number=1000,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+        risk_score=None,
+    )
+    assert stored is True
+
+    recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=1)
+    assert len(recent) == 1
+    assert recent[0]["risk_score"] is None
