@@ -234,7 +234,7 @@ class NotificationService:
                 logging.debug(f"Format failed, skip notify for tx={tx.get('hash', 'N/A')[:16]}")
 
         except Exception as e:
-            logging.error(f"Notify error user={user_id}: {e}")
+            logging.error(f"Notify error user={user_id}: {e}", exc_info=True)
 
 
 def format_token_amount(value: float, decimals: int = 6) -> str:
