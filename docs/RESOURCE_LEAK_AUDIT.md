@@ -1,86 +1,70 @@
 # Resource Leak Audit Report
 
 ## Summary
-Audit completed to identify potential file descriptor leaks and resource management issues similar to the EtherscanClient session leak.
+
+Comprehensive audit of file descriptor leaks and resource management issues, with all critical issues resolved.
 
 ## Issues Found and Fixed
 
 ### ✅ FIXED: EtherscanClient Session Leak
+
 **Location:** `usdt_monitor_bot/etherscan.py`
 
 **Problem:**
-- Sessions were created on-demand in each method call
-- Sessions were never closed, leading to file descriptor exhaustion
-- Error: "No file descriptors available"
+- Sessions were created on-demand in each method call without being closed
+- Led to file descriptor exhaustion: "No file descriptors available"
 
 **Solution:**
-- Added `_ensure_session()` method to create/reuse a single session
-- Updated all methods to use `_ensure_session()` instead of creating sessions directly
-- Added `close()` call in `main.py` shutdown handler
-- Session is now properly closed on application shutdown
+- Added `_ensure_session()` method with double-checked locking pattern to create/reuse a single session
+- Added `_session_lock` to prevent race conditions during concurrent session creation
+- All API methods now use `_ensure_session()` instead of creating sessions directly
+- Session is properly closed in `main.py` shutdown handler via `await etherscan_client.close()`
 
-## Resources Checked - All Good ✅
+### ✅ FIXED: Connection Pool Exhaustion
 
-### 1. Database Connections
-**Location:** `usdt_monitor_bot/database.py`
+**Location:** `usdt_monitor_bot/etherscan.py`
 
-**Status:** ✅ **SAFE**
-- All database connections use context managers: `with sqlite3.connect(...)`
-- Connections are automatically closed when exiting the context
-- No leaks detected
+**Solution:**
+- Added `TCPConnector` with strict connection limits:
+  - `limit=3` (max total connections)
+  - `limit_per_host=2` (max per host)
+  - `ttl_dns_cache=300` (DNS cache TTL)
+- Session cleanup relies on aiohttp's automatic connector closing
 
-### 2. File Operations
-**Status:** ✅ **SAFE**
-- No file operations found in the codebase
-- No file handles to manage
+### ✅ FIXED: Aiogram Bot Session Limits
 
-### 3. Bot Session
 **Location:** `usdt_monitor_bot/main.py`
 
-**Status:** ✅ **SAFE**
-- Bot session is properly closed: `await bot.session.close()`
-- Called in the `finally` block during shutdown
+**Solution:**
+- Configured `AiohttpSession` with `limit=10` to prevent connection exhaustion during polling
 
-### 4. AsyncIO Tasks
-**Location:** `usdt_monitor_bot/checker.py`
+## Resources Verified Safe ✅
 
-**Status:** ✅ **SAFE**
-- `asyncio.gather()` is used correctly with `return_exceptions=True`
-- All tasks are awaited and completed
-- No orphaned tasks
+| Resource | Location | Status | Notes |
+|----------|----------|--------|-------|
+| Database Connections | `database.py` | ✅ Safe | Uses context managers (`with sqlite3.connect(...)`) |
+| Bot Session | `main.py` | ✅ Safe | Closed in `finally` block: `await bot.session.close()` |
+| AsyncIO Tasks | `checker.py` | ✅ Safe | Uses `asyncio.gather()` with `return_exceptions=True` |
+| Scheduler | `main.py` | ✅ Safe | `scheduler.shutdown(wait=True)` waits for jobs |
+| Etherscan Client | `etherscan.py` | ✅ Safe | Single session with connection limits |
 
-### 5. Scheduler
-**Location:** `usdt_monitor_bot/main.py`
+## Shutdown Sequence
 
-**Status:** ✅ **SAFE**
-- `scheduler.shutdown()` is called in the `finally` block
-- APScheduler handles cleanup internally
-
-## Recommendations
-
-### 1. Scheduler Shutdown ✅ IMPLEMENTED
-**Status:** ✅ **COMPLETED**
-
-The scheduler now waits for running jobs to complete during shutdown:
+The application follows a proper shutdown sequence in `main.py`:
 
 ```python
-scheduler.shutdown(wait=True)  # Wait for running jobs to complete
+finally:
+    scheduler.shutdown(wait=True)  # Wait for running jobs
+    await etherscan_client.close()  # Close HTTP session
+    await bot.session.close()       # Close bot session
 ```
-
-This ensures that any in-progress transaction checks complete gracefully before the application exits, preventing potential data inconsistencies or incomplete operations.
-
-### 2. Add Resource Monitoring (Optional)
-Consider adding monitoring/logging for:
-- Number of open file descriptors
-- Session creation/destruction
-- Connection pool sizes
-
-This would help detect future leaks early.
 
 ## Conclusion
 
 ✅ **All critical resource leaks have been identified and fixed.**
 
-The main issue was the EtherscanClient session leak, which has been resolved. All other resources (database connections, bot sessions, async tasks) are properly managed.
-
-The codebase is now safe from file descriptor leaks.
+The codebase properly manages:
+- HTTP sessions (single reusable session with connection limits)
+- Database connections (context managers)
+- Async tasks (proper awaiting)
+- Graceful shutdown (ordered resource cleanup)
