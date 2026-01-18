@@ -8,14 +8,13 @@ Telegram bot configuration, and transaction checking scheduler.
 # Standard library
 import asyncio
 import logging
-import os
-import time
 from datetime import datetime
-from pathlib import Path
 
 # Third-party
+import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -26,50 +25,6 @@ from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
-
-# Debug log path - works in both local and container environments
-_DEBUG_LOG_PATH = None
-
-
-def _get_debug_log_path() -> str:
-    """Get the debug log file path, creating it if necessary.
-
-    Works in both local development and container environments.
-    In containers, uses /app/data/.cursor/debug.log (writable data directory).
-    In local dev, finds workspace root by looking for .cursor or pyproject.toml.
-    """
-    global _DEBUG_LOG_PATH
-    if _DEBUG_LOG_PATH is None:
-        current = Path.cwd()
-
-        # Check if we're in a container (working directory is /app)
-        if str(current) == "/app" or (
-            len(current.parts) > 0 and current.parts[-1] == "app"
-        ):
-            # Container environment: use /app/data/.cursor/debug.log (writable data dir)
-            _DEBUG_LOG_PATH = "/app/data/.cursor/debug.log"
-            try:
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-            except (OSError, PermissionError):
-                # Fallback to /app/.cursor if data directory fails
-                _DEBUG_LOG_PATH = "/app/.cursor/debug.log"
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # Local development: try to find workspace root
-            for parent in [current] + list(current.parents):
-                if (parent / ".cursor").exists() or (
-                    parent / "pyproject.toml"
-                ).exists():
-                    _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
-                    # Ensure .cursor directory exists
-                    (parent / ".cursor").mkdir(exist_ok=True)
-                    break
-            else:
-                # Fallback: use current directory
-                _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-    return _DEBUG_LOG_PATH
-
 
 async def main() -> None:
     # 1. Configure basic logging first (before config load, which also logs)
@@ -106,12 +61,23 @@ async def main() -> None:
         return  # Or raise an exception
 
     # 4. Initialize Bot and Dispatcher
+    # FIX: Configure custom connector with strict limits to prevent FD leaks
+    # The default aiogram session uses limit=100 which can accumulate FDs over time
+    bot_connector = aiohttp.TCPConnector(
+        limit=10,  # Maximum total connections (reduced from default 100)
+        limit_per_host=5,  # Maximum connections per host (Telegram API)
+        enable_cleanup_closed=True,  # Clean up closed SSL transports to prevent FD leaks
+        force_close=True,  # Close connections after each request
+        ttl_dns_cache=300,  # DNS cache TTL (5 minutes)
+    )
+    bot_session = AiohttpSession(connector=bot_connector)
     bot = Bot(
         token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        session=bot_session,
     )
     dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
-    logging.info("Aiogram Bot and Dispatcher initialized.")
+    logging.info("Aiogram Bot and Dispatcher initialized with custom session.")
 
     # 5. Initialize Services (Clients, Notifier, Checker)
     etherscan_client = EtherscanClient(config=config)
@@ -148,89 +114,8 @@ async def main() -> None:
     finally:
         logging.info("Shutting down...")
         scheduler.shutdown(wait=True)  # Wait for running jobs to complete
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "D",
-                            "location": "main.py:103",
-                            "message": "Before closing resources",
-                            "data": {"fd_count": fd_count},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         await etherscan_client.close()
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "D",
-                            "location": "main.py:105",
-                            "message": "After etherscan_client.close()",
-                            "data": {"fd_count": fd_count},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         await bot.session.close()
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "D",
-                            "location": "main.py:106",
-                            "message": "After bot.session.close()",
-                            "data": {"fd_count": fd_count},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         logging.info("Scheduler shut down. Bot session closed. Exiting.")
 
 

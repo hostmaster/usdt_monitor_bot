@@ -17,6 +17,7 @@ from typing import List, Literal, Optional
 # Third-party
 import aiohttp
 
+
 # Local
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
@@ -401,102 +402,19 @@ class TransactionChecker:
         )
         tx_metadata.contract_age_blocks = contract_age
 
-        # Build whitelist: monitored address + official token contract addresses
-        whitelisted_addresses = {
-            address_lower
-        }  # Whitelist the monitored address itself
-        # Add all official token contract addresses to whitelist
+        # Build whitelist of trusted addresses (token contracts only)
+        # The monitored address is passed separately to enable spam detection on incoming transactions
+        whitelisted_addresses = set()
         for token in self._config.token_registry.get_all_tokens().values():
             whitelisted_addresses.add(token.contract_address)
 
-        # #region agent log
-        try:
-            import json
-            import time
-            from pathlib import Path
-
-            current = Path.cwd()
-            if str(current) == "/app" or (
-                len(current.parts) > 0 and current.parts[-1] == "app"
-            ):
-                log_path = "/app/data/.cursor/debug.log"
-            else:
-                log_path = str(Path.cwd() / ".cursor" / "debug.log")
-            with open(log_path, "a") as f:
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "G",
-                            "location": "checker.py:430",
-                            "message": "Before risk analysis",
-                            "data": {
-                                "tx_hash": tx_metadata.tx_hash,
-                                "from_address": tx_metadata.from_address,
-                                "to_address": tx_metadata.to_address,
-                                "value": str(tx_metadata.value),
-                                "value_decimal": float(tx_metadata.value),
-                                "is_zero": tx_metadata.value == 0,
-                                "whitelist_size": len(whitelisted_addresses),
-                                "from_in_whitelist": tx_metadata.from_address.lower()
-                                in {a.lower() for a in whitelisted_addresses},
-                                "to_in_whitelist": tx_metadata.to_address.lower()
-                                in {a.lower() for a in whitelisted_addresses},
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
-
-        # Analyze transaction with whitelist
+        # Analyze transaction with whitelist and monitored address
         risk_analysis = self._spam_detector.analyze_transaction(
             tx_metadata,
             historical_metadata,
             whitelisted_addresses=whitelisted_addresses,
+            monitored_address=address_lower,
         )
-
-        # #region agent log
-        try:
-            import json
-            import time
-            from pathlib import Path
-
-            current = Path.cwd()
-            if str(current) == "/app" or (
-                len(current.parts) > 0 and current.parts[-1] == "app"
-            ):
-                log_path = "/app/data/.cursor/debug.log"
-            else:
-                log_path = str(Path.cwd() / ".cursor" / "debug.log")
-            with open(log_path, "a") as f:
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "G",
-                            "location": "checker.py:435",
-                            "message": "After risk analysis",
-                            "data": {
-                                "tx_hash": tx_metadata.tx_hash,
-                                "risk_score": risk_analysis.score,
-                                "is_suspicious": risk_analysis.is_suspicious,
-                                "flags": [f.value for f in risk_analysis.flags],
-                                "details": risk_analysis.details,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
 
         if risk_analysis.is_suspicious:
             logging.warning(
@@ -560,44 +478,6 @@ class TransactionChecker:
 
         # Get token config
         token_config = self._config.token_registry.get_token(tx_token_symbol)
-        # #region agent log
-        try:
-            import json
-            import time
-            from pathlib import Path
-
-            # Use same path detection logic as other modules
-            current = Path.cwd()
-            if str(current) == "/app" or (
-                len(current.parts) > 0 and current.parts[-1] == "app"
-            ):
-                log_path = "/app/data/.cursor/debug.log"
-            else:
-                log_path = str(Path.cwd() / ".cursor" / "debug.log")
-            Path(log_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(log_path, "a") as f:
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "F",
-                            "location": "checker.py:504",
-                            "message": "Token config lookup",
-                            "data": {
-                                "tx_hash": tx_hash,
-                                "token_symbol": tx_token_symbol,
-                                "has_token_config": token_config is not None,
-                                "spam_detection_enabled": self._spam_detection_enabled,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         if not token_config:
             logging.warning(
                 f"Token config not found for {tx_token_symbol}, skipping spam detection"
@@ -611,93 +491,10 @@ class TransactionChecker:
             tx_metadata = self._convert_to_transaction_metadata(
                 tx, token_config.decimals
             )
-            # #region agent log
-            try:
-                import json
-                import time
-                from pathlib import Path
-
-                current = Path.cwd()
-                if str(current) == "/app" or (
-                    len(current.parts) > 0 and current.parts[-1] == "app"
-                ):
-                    log_path = "/app/data/.cursor/debug.log"
-                else:
-                    log_path = str(Path.cwd() / ".cursor" / "debug.log")
-                with open(log_path, "a") as f:
-                    f.write(
-                        json.dumps(
-                            {
-                                "sessionId": "debug-session",
-                                "runId": "run1",
-                                "hypothesisId": "F",
-                                "location": "checker.py:520",
-                                "message": "Transaction metadata created",
-                                "data": {
-                                    "tx_hash": tx_hash,
-                                    "has_metadata": tx_metadata is not None,
-                                    "value": str(tx_metadata.value)
-                                    if tx_metadata
-                                    else None,
-                                    "value_type": type(tx_metadata.value).__name__
-                                    if tx_metadata
-                                    else None,
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             if tx_metadata:
                 risk_analysis = await self._enrich_transaction_metadata(
                     tx_metadata, address_lower, historical_metadata
                 )
-                # #region agent log
-                try:
-                    import json
-                    import time
-                    from pathlib import Path
-
-                    current = Path.cwd()
-                    if str(current) == "/app" or (
-                        len(current.parts) > 0 and current.parts[-1] == "app"
-                    ):
-                        log_path = "/app/data/.cursor/debug.log"
-                    else:
-                        log_path = str(Path.cwd() / ".cursor" / "debug.log")
-                    with open(log_path, "a") as f:
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "F",
-                                    "location": "checker.py:524",
-                                    "message": "Risk analysis result",
-                                    "data": {
-                                        "tx_hash": tx_hash,
-                                        "has_risk_analysis": risk_analysis is not None,
-                                        "risk_score": risk_analysis.score
-                                        if risk_analysis
-                                        else None,
-                                        "is_suspicious": risk_analysis.is_suspicious
-                                        if risk_analysis
-                                        else None,
-                                        "flags": [f.value for f in risk_analysis.flags]
-                                        if risk_analysis and risk_analysis.flags
-                                        else [],
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
                 historical_metadata.append(tx_metadata)
 
         # Store transaction if metadata was created

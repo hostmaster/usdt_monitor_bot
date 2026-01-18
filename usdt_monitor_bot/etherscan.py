@@ -8,9 +8,7 @@ including transaction fetching and contract information retrieval.
 # Standard library
 import asyncio
 import logging
-import os
 import time
-from pathlib import Path
 from typing import List, Optional
 
 # Third-party
@@ -27,48 +25,6 @@ from tenacity import (
 # Local
 from usdt_monitor_bot.config import BotConfig
 
-# Debug log path - works in both local and container environments
-_DEBUG_LOG_PATH = None
-
-
-def _get_debug_log_path() -> str:
-    """Get the debug log file path, creating it if necessary.
-
-    Works in both local development and container environments.
-    In containers, uses /app/data/.cursor/debug.log (writable data directory).
-    In local dev, finds workspace root by looking for .cursor or pyproject.toml.
-    """
-    global _DEBUG_LOG_PATH
-    if _DEBUG_LOG_PATH is None:
-        current = Path.cwd()
-
-        # Check if we're in a container (working directory is /app)
-        if str(current) == "/app" or (
-            len(current.parts) > 0 and current.parts[-1] == "app"
-        ):
-            # Container environment: use /app/data/.cursor/debug.log (writable data dir)
-            _DEBUG_LOG_PATH = "/app/data/.cursor/debug.log"
-            try:
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-            except (OSError, PermissionError):
-                # Fallback to /app/.cursor if data directory fails
-                _DEBUG_LOG_PATH = "/app/.cursor/debug.log"
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # Local development: try to find workspace root
-            for parent in [current] + list(current.parents):
-                if (parent / ".cursor").exists() or (
-                    parent / "pyproject.toml"
-                ).exists():
-                    _DEBUG_LOG_PATH = str(parent / ".cursor" / "debug.log")
-                    # Ensure .cursor directory exists
-                    (parent / ".cursor").mkdir(exist_ok=True)
-                    break
-            else:
-                # Fallback: use current directory
-                _DEBUG_LOG_PATH = str(Path.cwd() / ".cursor" / "debug.log")
-                Path(_DEBUG_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-    return _DEBUG_LOG_PATH
 
 
 class EtherscanError(Exception):
@@ -200,73 +156,19 @@ class EtherscanClient:
     def _create_connector(self) -> TCPConnector:
         """Create a TCPConnector with configured limits to prevent file descriptor exhaustion.
 
-        Connection pooling (keep-alive) is enabled by default to improve performance
-        by reusing TCP connections and avoiding repeated TLS handshakes.
-
         Returns:
             A configured TCPConnector instance.
         """
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "B",
-                            "location": "etherscan.py:155",
-                            "message": "Creating connector",
-                            "data": {"fd_count": fd_count},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         # Create connector with strict limits to prevent file descriptor exhaustion
-        # Connection pooling is enabled by default (force_close=False) for better performance
+        # FIX: Use force_close=True to close connections after each request
+        # FIX: Enable cleanup_closed to clean up closed SSL transports
         connector = TCPConnector(
             limit=self.MAX_TOTAL_CONNECTIONS,
             limit_per_host=self.MAX_CONNECTIONS_PER_HOST,
             ttl_dns_cache=self.DNS_CACHE_TTL_SECONDS,
+            force_close=True,  # Close connections after each request to prevent FD accumulation
+            enable_cleanup_closed=True,  # Enable cleanup of closed SSL transports
         )
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "B",
-                            "location": "etherscan.py:172",
-                            "message": "Connector created",
-                            "data": {"fd_count": fd_count},
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         return connector
 
     def _create_session(self) -> aiohttp.ClientSession:
@@ -284,39 +186,6 @@ class EtherscanClient:
         Thread-safe: Uses a lock to prevent race conditions when multiple
         coroutines try to create a session concurrently.
         """
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "A",
-                            "location": "etherscan.py:181",
-                            "message": "_ensure_session entry",
-                            "data": {
-                                "fd_count": fd_count,
-                                "has_session": self._session is not None,
-                                "session_closed": getattr(self._session, "closed", True)
-                                if self._session
-                                else None,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         # Check if session exists outside the lock for better performance
         if self._session and not getattr(self._session, "closed", True):
             return
@@ -326,119 +195,16 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
-                # #region agent log
-                try:
-                    old_session = self._session
-                    old_connector = (
-                        getattr(old_session, "connector", None) if old_session else None
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "A",
-                                    "location": "etherscan.py:196",
-                                    "message": "Creating new session",
-                                    "data": {
-                                        "old_session_exists": old_session is not None,
-                                        "old_connector_exists": old_connector
-                                        is not None,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
-                # CRITICAL FIX: Close old session and connector before creating new one
+                # Close old session and connector before creating new one
                 if self._session:
                     try:
                         old_connector = getattr(self._session, "connector", None)
                         if old_connector and hasattr(old_connector, "close"):
                             await old_connector.close()
                         await self._session.close()
-                        # #region agent log
-                        try:
-                            with open(_get_debug_log_path(), "a") as f:
-                                import json
-
-                                f.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "debug-session",
-                                            "runId": "run1",
-                                            "hypothesisId": "A",
-                                            "location": "etherscan.py:203",
-                                            "message": "Closed old session before creating new",
-                                            "data": {},
-                                            "timestamp": int(time.time() * 1000),
-                                        }
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # #endregion
                     except Exception as e:
-                        # #region agent log
-                        try:
-                            with open(_get_debug_log_path(), "a") as f:
-                                import json
-
-                                f.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "debug-session",
-                                            "runId": "run1",
-                                            "hypothesisId": "A",
-                                            "location": "etherscan.py:210",
-                                            "message": "Error closing old session",
-                                            "data": {"error": str(e)},
-                                            "timestamp": int(time.time() * 1000),
-                                        }
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # #endregion
-                        logging.debug(
-                            f"Error closing old session before creating new (non-critical): {e}"
-                        )
+                        logging.debug(f"Error closing old session before creating new (non-critical): {e}")
                 self._session = self._create_session()
-                # #region agent log
-                try:
-                    fd_count = (
-                        len(os.listdir("/proc/self/fd"))
-                        if os.path.exists("/proc/self/fd")
-                        else -1
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "A",
-                                    "location": "etherscan.py:217",
-                                    "message": "New session created",
-                                    "data": {"fd_count": fd_count},
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
 
     async def __aenter__(self):
         """Create a new session when entering the context."""
@@ -522,64 +288,7 @@ class EtherscanClient:
 
         async def _make_request():
             """Inner function to make the actual request."""
-            # #region agent log
-            try:
-                fd_count = (
-                    len(os.listdir("/proc/self/fd"))
-                    if os.path.exists("/proc/self/fd")
-                    else -1
-                )
-                with open(_get_debug_log_path(), "a") as f:
-                    import json
-
-                    f.write(
-                        json.dumps(
-                            {
-                                "sessionId": "debug-session",
-                                "runId": "run1",
-                                "hypothesisId": "E",
-                                "location": "etherscan.py:280",
-                                "message": "Before HTTP request",
-                                "data": {"fd_count": fd_count},
-                                "timestamp": int(time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
             async with self._session.get(self._base_url, params=params) as response:
-                # #region agent log
-                try:
-                    fd_count = (
-                        len(os.listdir("/proc/self/fd"))
-                        if os.path.exists("/proc/self/fd")
-                        else -1
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "E",
-                                    "location": "etherscan.py:282",
-                                    "message": "HTTP response context entered",
-                                    "data": {
-                                        "fd_count": fd_count,
-                                        "status": response.status,
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
                 if response.status == 429:  # Too Many Requests
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
@@ -590,33 +299,6 @@ class EtherscanClient:
                     )
 
                 data = await response.json()
-                # #region agent log
-                try:
-                    fd_count = (
-                        len(os.listdir("/proc/self/fd"))
-                        if os.path.exists("/proc/self/fd")
-                        else -1
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "E",
-                                    "location": "etherscan.py:295",
-                                    "message": "After response.json()",
-                                    "data": {"fd_count": fd_count},
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
 
                 # Etherscan API returns status '0' for errors, '1' for success.
                 if data.get("status") != "1":
@@ -645,9 +327,6 @@ class EtherscanClient:
                     raise EtherscanError(error_details)
 
                 return data.get("result", [])
-                # #region agent log
-                # Response will be closed when exiting the async with block
-                # #endregion
 
         # The @retry decorator will handle ClientError and TimeoutError.
         # We only need to catch other exceptions like JSON decoding errors.
@@ -854,36 +533,6 @@ class EtherscanClient:
 
     async def close(self):
         """Close the session and its connector if they exist."""
-        # #region agent log
-        try:
-            fd_count = (
-                len(os.listdir("/proc/self/fd"))
-                if os.path.exists("/proc/self/fd")
-                else -1
-            )
-            with open(_get_debug_log_path(), "a") as f:
-                import json
-
-                f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "debug-session",
-                            "runId": "run1",
-                            "hypothesisId": "C",
-                            "location": "etherscan.py:524",
-                            "message": "close() called",
-                            "data": {
-                                "fd_count": fd_count,
-                                "has_session": self._session is not None,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         if self._session:
             try:
                 # Get connector before closing session
@@ -893,112 +542,19 @@ class EtherscanClient:
                 # This helps release file descriptors immediately
                 if connector and hasattr(connector, "close"):
                     try:
-                        # Close idle connections to free up file descriptors
                         await connector.close()
-                        # #region agent log
-                        try:
-                            fd_count = (
-                                len(os.listdir("/proc/self/fd"))
-                                if os.path.exists("/proc/self/fd")
-                                else -1
-                            )
-                            with open(_get_debug_log_path(), "a") as f:
-                                import json
-
-                                f.write(
-                                    json.dumps(
-                                        {
-                                            "sessionId": "debug-session",
-                                            "runId": "run1",
-                                            "hypothesisId": "C",
-                                            "location": "etherscan.py:535",
-                                            "message": "Connector closed",
-                                            "data": {"fd_count": fd_count},
-                                            "timestamp": int(time.time() * 1000),
-                                        }
-                                    )
-                                    + "\n"
-                                )
-                        except Exception:
-                            pass
-                        # #endregion
                     except Exception as e:
-                        logging.debug(
-                            f"Error closing connector connections (non-critical): {e}"
-                        )
+                        logging.debug(f"Error closing connector connections (non-critical): {e}")
 
                 # Always attempt to close - aiohttp sessions handle already-closed gracefully
-                # For mocks, this ensures close() is called
                 await self._session.close()
-                # #region agent log
-                try:
-                    fd_count = (
-                        len(os.listdir("/proc/self/fd"))
-                        if os.path.exists("/proc/self/fd")
-                        else -1
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "C",
-                                    "location": "etherscan.py:543",
-                                    "message": "Session closed",
-                                    "data": {"fd_count": fd_count},
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
 
                 # Wait 0.2 seconds for connections to close gracefully.
-                # This brief delay allows aiohttp's connection pool to properly release
-                # file descriptors and close underlying TCP connections before the event
-                # loop continues. Without this, connections may not be fully closed when
-                # the session.close() coroutine completes, potentially leading to resource leaks.
                 await asyncio.sleep(0.2)
-                # #region agent log
-                try:
-                    fd_count = (
-                        len(os.listdir("/proc/self/fd"))
-                        if os.path.exists("/proc/self/fd")
-                        else -1
-                    )
-                    with open(_get_debug_log_path(), "a") as f:
-                        import json
-
-                        f.write(
-                            json.dumps(
-                                {
-                                    "sessionId": "debug-session",
-                                    "runId": "run1",
-                                    "hypothesisId": "C",
-                                    "location": "etherscan.py:550",
-                                    "message": "After sleep, close complete",
-                                    "data": {"fd_count": fd_count},
-                                    "timestamp": int(time.time() * 1000),
-                                }
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
             except (aiohttp.ClientError, RuntimeError) as e:
                 # If closing fails (e.g., already closed or event loop closed), log and continue
-                logging.debug(
-                    f"Error closing EtherscanClient session (non-critical): {e}"
-                )
+                logging.debug(f"Error closing EtherscanClient session (non-critical): {e}")
             except Exception as e:
                 # Catch any other unexpected errors but log them
-                logging.warning(
-                    f"Unexpected error closing EtherscanClient session: {e}"
-                )
+                logging.warning(f"Unexpected error closing EtherscanClient session: {e}")
         self._session = None
