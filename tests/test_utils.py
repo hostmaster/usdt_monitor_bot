@@ -5,8 +5,6 @@ Tests for utility functions like address validation.
 Note: Token message formatting tests are in test_notifier.py.
 """
 
-import pytest
-
 from usdt_monitor_bot.handlers import is_valid_ethereum_address
 
 
