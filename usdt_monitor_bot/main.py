@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 
 # Third-party
+from aiohttp import TCPConnector
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -60,17 +61,21 @@ async def main() -> None:
         return  # Or raise an exception
 
     # 4. Initialize Bot and Dispatcher
-    # FIX: Configure session with reduced connection limit to prevent FD leaks
-    # The default aiogram session uses limit=100 which can accumulate FDs over time
-    # AiohttpSession only accepts 'limit' parameter (not custom connector)
-    bot_session = AiohttpSession(limit=10)  # Reduced from default 100
+    # FIX: Configure custom connector to prevent FD leaks (consistent with EtherscanClient)
+    bot_connector = TCPConnector(
+        limit=10,  # Maximum total connections (reduced from default 100)
+        limit_per_host=5,  # Maximum connections per host
+        force_close=True,  # Close connections after each request
+        enable_cleanup_closed=True,  # Clean up closed SSL transports
+    )
+    bot_session = AiohttpSession(connector=bot_connector)
     bot = Bot(
         token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
     dp = Dispatcher(db_manager=db_manager)  # Pass db_manager here for handler injection
-    logging.info("Aiogram Bot and Dispatcher initialized with custom session (limit=10).")
+    logging.info("Aiogram Bot and Dispatcher initialized with custom connector.")
 
     # 5. Initialize Services (Clients, Notifier, Checker)
     etherscan_client = EtherscanClient(config=config)
