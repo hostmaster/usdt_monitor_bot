@@ -300,7 +300,7 @@ class TransactionChecker:
 
             return historical_metadata
         except Exception as e:
-            logging.debug(f"Historical tx error for {address_lower[:8]}: {e}")
+            logging.warning(f"Historical tx error for {address_lower[:8]}: {e}", exc_info=True)
             return []
 
     async def _get_contract_age_blocks(self, address: str, current_block: int) -> int:
