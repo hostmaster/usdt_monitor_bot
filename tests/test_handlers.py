@@ -324,10 +324,10 @@ async def test_remove_wallet_with_whitespace_only(
     )
 
 
-async def test_add_wallet_address_case_preserved_in_response(
+async def test_add_wallet_response_shows_normalized_address(
     mock_message: AsyncMock, mock_command_object: MagicMock, mock_db_manager: AsyncMock
 ):
-    """Test that add_wallet response shows lowercase address."""
+    """Test that add_wallet response shows address normalized to lowercase."""
     mock_command_object.args = VALID_ADDRESS_UPPER
     mock_db_manager.add_wallet.return_value = WalletAddResult.ADDED
 
