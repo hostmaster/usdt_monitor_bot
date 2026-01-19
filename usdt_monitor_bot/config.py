@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 # Local
 from usdt_monitor_bot.token_config import TokenConfig, TokenRegistry
 
+# Required environment variables
+REQUIRED_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ETHERSCAN_API_KEY")
+
 # Define a data directory inside the container's working directory
 DATA_DIR = "/app/data" if os.path.exists("/app") else "data"
 # Ensure the data directory exists
@@ -154,6 +157,11 @@ def _get_env_int(name: str, default: int) -> int:
     except ValueError:
         logging.warning(f"Invalid {name}='{value}', using default={default}")
         return default
+
+
+def check_required_env_vars() -> bool:
+    """Check if all required environment variables are set."""
+    return all(os.getenv(var) for var in REQUIRED_ENV_VARS)
 
 
 def load_config() -> BotConfig:
