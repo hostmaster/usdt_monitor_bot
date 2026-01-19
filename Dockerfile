@@ -26,4 +26,7 @@ RUN addgroup --system appgroup && \
     chmod 755 /app /app/data
 USER appuser
 
+# Explicitly set stop signal (SIGTERM is default, but being explicit is good practice)
+STOPSIGNAL SIGTERM
+
 CMD ["python", "-m", "usdt_monitor_bot.main"]
