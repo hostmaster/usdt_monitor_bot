@@ -6,6 +6,7 @@ Defines command handlers for the Telegram bot including /start, /help,
 """
 
 # Standard library
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -179,8 +180,10 @@ async def spam_report_handler(message: Message, db_manager: DatabaseManager):
 
     try:
         # Get spam summary and transactions in parallel
-        summary = await db_manager.get_spam_summary_for_user(user.id)
-        transactions = await db_manager.get_spam_transactions_for_user(user.id, limit=50)
+        summary, transactions = await asyncio.gather(
+            db_manager.get_spam_summary_for_user(user.id),
+            db_manager.get_spam_transactions_for_user(user.id, limit=50),
+        )
 
         if summary.get("count", 0) == 0:
             await message.reply(messages.SPAM_REPORT_EMPTY)
