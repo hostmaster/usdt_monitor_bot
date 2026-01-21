@@ -92,7 +92,6 @@ def format_spam_summary(summary: dict) -> str:
 
 def format_spam_transaction(tx: dict, index: int) -> str:
     """Format a single spam transaction for display."""
-    tx_hash = tx.get("tx_hash", "")
     from_addr = tx.get("from_address", "")
     value = tx.get("value", 0.0)
     token = tx.get("token_symbol", "???")
