@@ -484,3 +484,111 @@ class DatabaseManager:
         return await self._run_sync_db_operation(
             self._is_new_sender_address_sync, monitored_address, sender_address
         )
+
+    # --- Spam Transaction Operations ---
+    def _get_spam_transactions_for_user_sync(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Get spam transactions for all addresses monitored by a user.
+
+        Args:
+            user_id: The user ID
+            min_risk_score: Minimum risk score to consider as spam (default: 50)
+            limit: Maximum number of transactions to return
+
+        Returns:
+            List of spam transaction dictionaries
+        """
+        query = """
+            SELECT th.tx_hash, th.monitored_address, th.from_address, th.to_address,
+                   th.value, th.block_number, th.timestamp, th.token_symbol, th.risk_score
+            FROM transaction_history th
+            INNER JOIN wallets w ON th.monitored_address = w.address
+            WHERE w.user_id = ? AND th.risk_score >= ?
+            ORDER BY th.block_number DESC, th.timestamp DESC
+            LIMIT ?
+        """
+        results = self._execute_db_query(
+            query, (user_id, min_risk_score, limit), fetch_all=True
+        )
+        if not results:
+            return []
+
+        transactions = []
+        for row in results:
+            transactions.append(
+                {
+                    "tx_hash": row[0],
+                    "monitored_address": row[1],
+                    "from_address": row[2],
+                    "to_address": row[3],
+                    "value": row[4],
+                    "block_number": row[5],
+                    "timestamp": row[6],
+                    "token_symbol": row[7],
+                    "risk_score": row[8],
+                }
+            )
+        return transactions
+
+    def _get_spam_summary_for_user_sync(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+    ) -> dict:
+        """
+        Get aggregated spam statistics for a user.
+
+        Args:
+            user_id: The user ID
+            min_risk_score: Minimum risk score to consider as spam
+
+        Returns:
+            Dictionary with spam summary statistics
+        """
+        query = """
+            SELECT COUNT(*) as count,
+                   COALESCE(SUM(th.value), 0) as total_value,
+                   COALESCE(AVG(th.risk_score), 0) as avg_score,
+                   COALESCE(MAX(th.risk_score), 0) as max_score
+            FROM transaction_history th
+            INNER JOIN wallets w ON th.monitored_address = w.address
+            WHERE w.user_id = ? AND th.risk_score >= ?
+        """
+        result = self._execute_db_query(
+            query, (user_id, min_risk_score), fetch_one=True
+        )
+        if not result:
+            return {"count": 0, "total_value": 0.0, "avg_score": 0, "max_score": 0}
+
+        return {
+            "count": result[0] or 0,
+            "total_value": result[1] or 0.0,
+            "avg_score": int(result[2] or 0),
+            "max_score": result[3] or 0,
+        }
+
+    async def get_spam_transactions_for_user(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+        limit: int = 50,
+    ) -> List[dict]:
+        """Get spam transactions for all addresses monitored by a user."""
+        return await self._run_sync_db_operation(
+            self._get_spam_transactions_for_user_sync, user_id, min_risk_score, limit
+        )
+
+    async def get_spam_summary_for_user(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+    ) -> dict:
+        """Get aggregated spam statistics for a user."""
+        return await self._run_sync_db_operation(
+            self._get_spam_summary_for_user_sync, user_id, min_risk_score
+        )

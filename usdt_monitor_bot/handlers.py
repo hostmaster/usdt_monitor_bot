@@ -162,6 +162,39 @@ async def remove_wallet_handler(
     await message.reply(reply_text)
 
 
+@router.message(Command("spam"), F.chat.type == "private")
+async def spam_report_handler(message: Message, db_manager: DatabaseManager):
+    """
+    Show aggregated report of detected spam transactions.
+
+    Displays summary statistics and recent spam transactions that were
+    suppressed from normal notifications.
+    """
+    user = message.from_user
+    if not user:
+        return
+    await db_manager.add_user(
+        user.id, user.username, user.first_name, user.last_name
+    )  # Ensure user exists
+
+    try:
+        # Get spam summary and transactions in parallel
+        summary = await db_manager.get_spam_summary_for_user(user.id)
+        transactions = await db_manager.get_spam_transactions_for_user(user.id, limit=50)
+
+        if summary.get("count", 0) == 0:
+            await message.reply(messages.SPAM_REPORT_EMPTY)
+            return
+
+        report = messages.format_spam_report(summary, transactions, limit=10)
+        await message.reply(report, parse_mode="HTML")
+        logging.debug(f"Spam report sent: user={user.id} count={summary.get('count', 0)}")
+
+    except Exception as e:
+        logging.error(f"Spam report error: user={user.id} err={e}", exc_info=True)
+        await message.reply(messages.SPAM_REPORT_ERROR)
+
+
 @router.message(F.chat.type == "private")
 async def other_message_handler(message: Message):
     """Handles any other text messages in private chat."""
