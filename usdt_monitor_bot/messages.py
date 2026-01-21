@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from aiogram.utils.markdown import hbold, hcode
 
 
@@ -102,7 +104,6 @@ def format_spam_transaction(tx: dict, index: int) -> str:
     time_str = ""
     if timestamp:
         try:
-            from datetime import datetime
             if "T" in timestamp:
                 dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 time_str = dt.strftime("%m/%d %H:%M")
