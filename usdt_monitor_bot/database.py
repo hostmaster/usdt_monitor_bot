@@ -38,6 +38,7 @@ class DatabaseManager:
         fetch_one: bool = False,
         fetch_all: bool = False,
         commit: bool = False,
+        use_row_factory: bool = False,
     ):
         conn = None
         # For commit operations, we'll return rowcount on success, -1 on error.
@@ -49,6 +50,9 @@ class DatabaseManager:
                 self.db_path, timeout=self.timeout, check_same_thread=False
             ) as conn:
                 conn.execute("PRAGMA foreign_keys = ON;")
+                # Enable row factory for named column access when requested
+                if use_row_factory:
+                    conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(query, params)
 
@@ -374,7 +378,7 @@ class DatabaseManager:
                    ORDER BY block_number DESC, timestamp DESC
                    LIMIT ?"""
         results = self._execute_db_query(
-            query, (monitored_address.lower(), limit), fetch_all=True
+            query, (monitored_address.lower(), limit), fetch_all=True, use_row_factory=True
         )
         if not results:
             return []
@@ -383,14 +387,14 @@ class DatabaseManager:
         for row in results:
             transactions.append(
                 {
-                    "tx_hash": row[0],
-                    "from_address": row[1],
-                    "to_address": row[2],
-                    "value": row[3],
-                    "block_number": row[4],
-                    "timestamp": row[5],
-                    "token_symbol": row[6],
-                    "risk_score": row[7],
+                    "tx_hash": row["tx_hash"],
+                    "from_address": row["from_address"],
+                    "to_address": row["to_address"],
+                    "value": row["value"],
+                    "block_number": row["block_number"],
+                    "timestamp": row["timestamp"],
+                    "token_symbol": row["token_symbol"],
+                    "risk_score": row["risk_score"],
                 }
             )
         return transactions
@@ -483,4 +487,112 @@ class DatabaseManager:
         """Check if a sender address has been seen before."""
         return await self._run_sync_db_operation(
             self._is_new_sender_address_sync, monitored_address, sender_address
+        )
+
+    # --- Spam Transaction Operations ---
+    def _get_spam_transactions_for_user_sync(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Get spam transactions for all addresses monitored by a user.
+
+        Args:
+            user_id: The user ID
+            min_risk_score: Minimum risk score to consider as spam (default: 50)
+            limit: Maximum number of transactions to return
+
+        Returns:
+            List of spam transaction dictionaries
+        """
+        query = """
+            SELECT th.tx_hash, th.monitored_address, th.from_address, th.to_address,
+                   th.value, th.block_number, th.timestamp, th.token_symbol, th.risk_score
+            FROM transaction_history th
+            INNER JOIN wallets w ON th.monitored_address = w.address
+            WHERE w.user_id = ? AND th.risk_score >= ?
+            ORDER BY th.block_number DESC, th.timestamp DESC
+            LIMIT ?
+        """
+        results = self._execute_db_query(
+            query, (user_id, min_risk_score, limit), fetch_all=True, use_row_factory=True
+        )
+        if not results:
+            return []
+
+        transactions = []
+        for row in results:
+            transactions.append(
+                {
+                    "tx_hash": row["tx_hash"],
+                    "monitored_address": row["monitored_address"],
+                    "from_address": row["from_address"],
+                    "to_address": row["to_address"],
+                    "value": row["value"],
+                    "block_number": row["block_number"],
+                    "timestamp": row["timestamp"],
+                    "token_symbol": row["token_symbol"],
+                    "risk_score": row["risk_score"],
+                }
+            )
+        return transactions
+
+    def _get_spam_summary_for_user_sync(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+    ) -> dict:
+        """
+        Get aggregated spam statistics for a user.
+
+        Args:
+            user_id: The user ID
+            min_risk_score: Minimum risk score to consider as spam
+
+        Returns:
+            Dictionary with spam summary statistics
+        """
+        query = """
+            SELECT COUNT(*) as count,
+                   COALESCE(SUM(th.value), 0) as total_value,
+                   COALESCE(AVG(th.risk_score), 0) as avg_score,
+                   COALESCE(MAX(th.risk_score), 0) as max_score
+            FROM transaction_history th
+            INNER JOIN wallets w ON th.monitored_address = w.address
+            WHERE w.user_id = ? AND th.risk_score >= ?
+        """
+        result = self._execute_db_query(
+            query, (user_id, min_risk_score), fetch_one=True, use_row_factory=True
+        )
+        if not result:
+            return {"count": 0, "total_value": 0.0, "avg_score": 0, "max_score": 0}
+
+        return {
+            "count": result["count"] or 0,
+            "total_value": result["total_value"] or 0.0,
+            "avg_score": int(result["avg_score"] or 0),
+            "max_score": result["max_score"] or 0,
+        }
+
+    async def get_spam_transactions_for_user(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+        limit: int = 50,
+    ) -> List[dict]:
+        """Get spam transactions for all addresses monitored by a user."""
+        return await self._run_sync_db_operation(
+            self._get_spam_transactions_for_user_sync, user_id, min_risk_score, limit
+        )
+
+    async def get_spam_summary_for_user(
+        self,
+        user_id: int,
+        min_risk_score: int = 50,
+    ) -> dict:
+        """Get aggregated spam statistics for a user."""
+        return await self._run_sync_db_operation(
+            self._get_spam_summary_for_user_sync, user_id, min_risk_score
         )

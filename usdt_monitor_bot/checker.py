@@ -342,6 +342,54 @@ class TransactionChecker:
 
         return 0  # Default to 0 if unable to determine
 
+    def _format_transaction_log(
+        self,
+        tx_metadata: TransactionMetadata,
+        token_symbol: str,
+        address_lower: str,
+        risk_analysis: RiskAnalysis,
+    ) -> str:
+        """
+        Format a compact, informative log line for a detected transaction.
+
+        Args:
+            tx_metadata: Transaction metadata
+            token_symbol: Token symbol (USDT, USDC, etc.)
+            address_lower: The monitored address
+            risk_analysis: Risk analysis result
+
+        Returns:
+            Formatted log string
+        """
+        # Direction indicator
+        is_incoming = tx_metadata.to_address.lower() == address_lower
+        direction = "IN" if is_incoming else "OUT"
+
+        # Amount formatting - format Decimal directly to preserve precision
+        amount = f"{tx_metadata.value:.2f}"
+
+        # Whitelist status
+        is_whitelisted = risk_analysis.details.get("whitelisted", False)
+        whitelist_status = "WL" if is_whitelisted else ""
+
+        # Spam status
+        if risk_analysis.is_suspicious:
+            spam_status = f"SPAM:{risk_analysis.score}"
+        else:
+            spam_status = f"OK:{risk_analysis.score}"
+
+        # Build compact log
+        parts = [
+            f"TX {direction}",
+            f"{amount} {token_symbol}",
+            f"score={spam_status}",
+        ]
+        if whitelist_status:
+            parts.append(whitelist_status)
+
+        tx_short = tx_metadata.tx_hash[:10]
+        return f"[{tx_short}] {' | '.join(parts)}"
+
     async def _enrich_transaction_metadata(
         self,
         tx_metadata: TransactionMetadata,
@@ -385,13 +433,6 @@ class TransactionChecker:
             monitored_address=address_lower,
         )
 
-        if risk_analysis.is_suspicious:
-            flags_str = ",".join(f.value for f in risk_analysis.flags)
-            logging.warning(
-                f"Spam detected: tx={tx_metadata.tx_hash[:16]}... "
-                f"score={risk_analysis.score}/100 flags=[{flags_str}]"
-            )
-
         return risk_analysis
 
     async def _store_transaction_safely(
@@ -425,7 +466,10 @@ class TransactionChecker:
         historical_metadata: List[TransactionMetadata],
     ) -> int:
         """
-        Process a single transaction: analyze, store, and notify.
+        Process a single transaction: analyze, store, log, and notify.
+
+        Spam transactions are logged but not notified to users (suppressed).
+        Users can view spam transactions via /spam command.
 
         Args:
             tx: Transaction dictionary
@@ -434,7 +478,7 @@ class TransactionChecker:
             historical_metadata: Historical transactions (will be updated)
 
         Returns:
-            Number of notifications sent
+            Number of notifications sent (excludes suppressed spam)
         """
         tx_hash = tx.get("hash")
         tx_token_symbol = tx.get("token_symbol")
@@ -462,6 +506,15 @@ class TransactionChecker:
                 )
                 historical_metadata.append(tx_metadata)
 
+                # Log detected transaction with compact format
+                log_line = self._format_transaction_log(
+                    tx_metadata, tx_token_symbol, address_lower, risk_analysis
+                )
+                if risk_analysis.is_suspicious:
+                    logging.warning(log_line)
+                else:
+                    logging.info(log_line)
+
         # Store transaction if metadata was created
         if tx_metadata:
             await self._store_transaction_safely(
@@ -471,7 +524,12 @@ class TransactionChecker:
                 risk_analysis.score if risk_analysis else None,
             )
 
-        # Send notifications
+        # Suppress notifications for spam transactions
+        if risk_analysis and risk_analysis.is_suspicious:
+            logging.debug(f"Suppressing notification for spam tx={tx_hash[:16]}...")
+            return 0
+
+        # Send notifications for legitimate transactions only
         for user_id in user_ids:
             await self._notifier.send_token_notification(
                 user_id, tx, tx_token_symbol, address_lower, risk_analysis
