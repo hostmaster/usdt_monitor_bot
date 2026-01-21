@@ -365,8 +365,8 @@ class TransactionChecker:
         is_incoming = tx_metadata.to_address.lower() == address_lower
         direction = "IN" if is_incoming else "OUT"
 
-        # Amount formatting
-        amount = f"{float(tx_metadata.value):.2f}"
+        # Amount formatting - format Decimal directly to preserve precision
+        amount = f"{tx_metadata.value:.2f}"
 
         # Whitelist status
         is_whitelisted = risk_analysis.details.get("whitelisted", False)
