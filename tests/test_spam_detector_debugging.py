@@ -103,20 +103,26 @@ def test_debug_logging_similarity(caplog):
     detector = SpamDetector()
     
     # Log similarity analysis
-    SpamDebuggingLogger.log_similarity_analysis(
-        tx_hash="0xsimilarity123",
-        from_addr="0x1234567890abcdef1234567890abcdef12345678",
-        to_addr="0xrecipient",
-        reference_addr="0x1234567890fedcba1234567890fedcba12345678",
-        prefix_match=4,
-        suffix_match=5,
-        prefix_threshold=3,
-        suffix_threshold=4,
-        is_similar=True,
-    )
+    with caplog.at_level(logging.DEBUG):
+        SpamDebuggingLogger.log_similarity_analysis(
+            tx_hash="0xsimilarity123",
+            from_addr="0x1234567890abcdef1234567890abcdef12345678",
+            to_addr="0xrecipient",
+            reference_addr="0x1234567890fedcba1234567890fedcba12345678",
+            prefix_match=4,
+            suffix_match=5,
+            prefix_threshold=3,
+            suffix_threshold=4,
+            is_similar=True,
+        )
     
+    # Verify log was produced (debug is enabled, so it should always appear)
     log_text = caplog.text
-    assert "[SIMILARITY]" in log_text or True  # May not appear if DEBUG_ENABLED not set globally
+    assert "[SIMILARITY]" in log_text
+    assert "similarity123" in log_text or "0xsimilarity" in log_text
+    assert "SIMILAR" in log_text  # Should show SIMILAR since is_similar=True
+    assert "prefix: 4/3" in log_text
+    assert "suffix: 5/4" in log_text
 
 
 def test_debug_logging_disabled_by_default():
