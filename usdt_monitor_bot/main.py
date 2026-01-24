@@ -72,13 +72,17 @@ async def main() -> None:
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
-    # 5. Initialize Database
+    # 5. Setup signal handlers for graceful shutdown (SIGTERM/SIGINT)
+    shutdown_event = asyncio.Event()
+    _setup_signal_handlers(shutdown_event)
+
+    # 6. Initialize Database
     db_manager = DatabaseManager(db_path=config.db_path)
     if not await db_manager.init_db():
         logging.critical("Database init failed, exiting")
         return
 
-    # 6. Initialize Bot and Dispatcher
+    # 7. Initialize Bot and Dispatcher
     bot_session = AiohttpSession(limit=10)
     bot = Bot(
         token=config.telegram_bot_token,
@@ -88,7 +92,7 @@ async def main() -> None:
     dp = Dispatcher(db_manager=db_manager)
     logging.debug("Bot initialized with session limit=10")
 
-    # 7. Initialize Services
+    # 8. Initialize Services
     etherscan_client = EtherscanClient(config=config)
     notifier = NotificationService(bot=bot, config=config)
     transaction_checker = TransactionChecker(
@@ -98,10 +102,10 @@ async def main() -> None:
         notifier=notifier,
     )
 
-    # 8. Register Handlers
+    # 9. Register Handlers
     register_handlers(dp, db_manager)
 
-    # 9. Setup and Start Scheduler
+    # 10. Setup and Start Scheduler
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(
         transaction_checker.check_all_addresses,
@@ -113,7 +117,7 @@ async def main() -> None:
     )
     scheduler.start()
 
-    # 10. Start Bot Polling with graceful shutdown support
+    # 11. Start Bot Polling with graceful shutdown support
     logging.info("Bot started, polling for updates...")
 
     async def shutdown_waiter() -> None:
