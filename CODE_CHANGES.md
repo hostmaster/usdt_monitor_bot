@@ -135,7 +135,7 @@ All tests pass. All 177 tests pass including 7 new ones.
 ## 6. New Documentation Files
 
 ### docs/SPAM_DETECTOR_DEBUGGING.md
-- Comprehensive 500+ line guide
+- Comprehensive 293 line guide
 - Step-by-step debugging examples
 - Common bypass patterns and fixes
 - Log analysis techniques
