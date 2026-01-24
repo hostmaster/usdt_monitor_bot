@@ -116,17 +116,22 @@ def test_whitelist_check_logging(caplog):
     """Test whitelist check logging."""
     enable_spam_detector_debugging()
     
-    SpamDebuggingLogger.log_whitelist_check(
-        tx_hash="0xwhitelist123",
-        from_addr="0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        to_addr="0x1234567890123456789012345678901234567890",
-        whitelisted_from=True,
-        whitelisted_to=False,
-        from_is_monitored=False,
-    )
+    with caplog.at_level(logging.DEBUG):
+        SpamDebuggingLogger.log_whitelist_check(
+            tx_hash="0xwhitelist123",
+            from_addr="0xdAC17F958D2ee523a2206206994597C13D831ec7",
+            to_addr="0x1234567890123456789012345678901234567890",
+            whitelisted_from=True,
+            whitelisted_to=False,
+            from_is_monitored=False,
+        )
     
-    # Note: These logs only appear if DEBUG_ENABLED is True
-    # The function returns early if not enabled
+    # Verify log was produced
+    log_text = caplog.text
+    assert "[WHITELIST]" in log_text
+    assert "whitelist123" in log_text or "0xwhitelist" in log_text
+    assert "FROM_WHITELISTED" in log_text
+    assert "dac17f958d" in log_text.lower()  # Truncated from address
 
 
 def test_multiple_filters_bypass_detection(caplog):
