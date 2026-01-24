@@ -87,12 +87,13 @@ def test_debug_logging_bypass_case(caplog):
         contract_age_blocks=5,  # Brand new contract
     )
     
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         detector.analyze_transaction(tx, [])
     
     log_text = caplog.text
-    # Should see bypass case in logs or verdict
-    assert "[SPAM_BYPASS_CASE]" in log_text or "[SPAM_VERDICT]" in log_text
+    # Should see bypass case (WARNING level) and verdict (DEBUG level)
+    assert "[SPAM_BYPASS_CASE]" in log_text
+    assert "[SPAM_VERDICT]" in log_text
     assert "bypasscase" in log_text
 
 
