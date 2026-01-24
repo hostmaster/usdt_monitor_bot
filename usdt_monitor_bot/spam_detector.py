@@ -84,7 +84,7 @@ class SpamDebuggingLogger:
         filter_name: str,
         triggered: bool,
         score_delta: int,
-        details: Dict = None,
+        details: Optional[str] = None,
     ) -> None:
         """
         Log evaluation of each spam filter for this transaction.
@@ -95,7 +95,7 @@ class SpamDebuggingLogger:
             filter_name: Name of filter (e.g., "DUST_AMOUNT", "SIMILAR_ADDRESS")
             triggered: Whether filter was triggered
             score_delta: Score added by this filter
-            details: Additional context about filter evaluation
+            details: Additional context about filter evaluation (as string)
         """
         if not SpamDebuggingLogger.DEBUG_ENABLED:
             return
