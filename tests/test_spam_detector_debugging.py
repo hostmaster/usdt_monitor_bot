@@ -18,6 +18,24 @@ from usdt_monitor_bot.spam_detector import (
 )
 
 
+@pytest.fixture(autouse=True)
+def reset_debug_logger_state():
+    """Reset SpamDebuggingLogger state before each test to ensure test isolation."""
+    # Save original values
+    original_debug_enabled = SpamDebuggingLogger.DEBUG_ENABLED
+    original_min_score = SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG
+    
+    # Reset to defaults before each test
+    SpamDebuggingLogger.DEBUG_ENABLED = False
+    SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG = 45
+    
+    yield
+    
+    # Restore original values after test (though autouse=True means this runs before each test)
+    SpamDebuggingLogger.DEBUG_ENABLED = original_debug_enabled
+    SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG = original_min_score
+
+
 def test_debug_logging_enabled():
     """Test that debug logging can be enabled."""
     enable_spam_detector_debugging(min_score=40)
@@ -103,13 +121,15 @@ def test_debug_logging_similarity(caplog):
 
 def test_debug_logging_disabled_by_default():
     """Test that debug logging is disabled by default."""
-    # Create detector without enabling debug
+    # Verify default state (fixture ensures clean state before each test)
+    assert SpamDebuggingLogger.DEBUG_ENABLED is False
+    assert SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG == 45
+    
+    # Create detector without enabling debug - should not change state
     detector = SpamDetector()
     
-    # SpamDebuggingLogger.DEBUG_ENABLED should be False initially
-    # (unless set by another test)
-    # This test verifies the flag exists and is accessible
-    assert hasattr(SpamDebuggingLogger, "DEBUG_ENABLED")
+    # State should still be disabled
+    assert SpamDebuggingLogger.DEBUG_ENABLED is False
 
 
 def test_whitelist_check_logging(caplog):
