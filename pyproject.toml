@@ -51,7 +51,7 @@ dev = [
     # Add other development tools here
 ]
 security = [
-    "bandit==1.9.2",           # Security linter
+    "bandit==1.9.3",           # Security linter
     "safety==3.7.0",           # Dependency vulnerability checker
 ]
 
