@@ -52,6 +52,7 @@ class BotConfig:
         max_transaction_age_days: int = 7,  # Only report transactions from last 7 days
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
         verbose_logging: bool = False,  # Enable DEBUG level logging
+        spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -87,6 +88,7 @@ class BotConfig:
 
         # Logging settings
         self.verbose_logging = verbose_logging
+        self.spam_detection_debug = spam_detection_debug
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -202,6 +204,10 @@ def load_config() -> BotConfig:
     verbose_env = os.getenv("VERBOSE", "").lower()
     verbose_logging = verbose_env in ("true", "1", "yes", "on")
 
+    # Spam detection debugging option
+    spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
+    spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
+
     # Log all config details at DEBUG level
     logging.debug(
         f"Config: db={db_path}, api_url={etherscan_base_url}, "
@@ -231,6 +237,7 @@ def load_config() -> BotConfig:
         max_transaction_age_days=max_transaction_age_days,
         max_transactions_per_check=max_transactions_per_check,
         verbose_logging=verbose_logging,
+        spam_detection_debug=spam_detection_debug,
     )
 
     # Token configuration overrides

@@ -25,6 +25,7 @@ from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
+from usdt_monitor_bot.spam_detector import enable_spam_detector_debugging
 
 
 def _setup_signal_handlers(shutdown_event: asyncio.Event) -> None:
@@ -63,13 +64,13 @@ async def main() -> None:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.debug("DEBUG logging enabled")
 
+    # 4. Enable spam detection debugging if configured
+    if config.spam_detection_debug:
+        enable_spam_detector_debugging()
+
     # Suppress verbose logs from third-party libraries
     logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
-
-    # 4. Setup signal handlers for graceful shutdown (SIGTERM/SIGINT)
-    shutdown_event = asyncio.Event()
-    _setup_signal_handlers(shutdown_event)
 
     # 5. Initialize Database
     db_manager = DatabaseManager(db_path=config.db_path)
