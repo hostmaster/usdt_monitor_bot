@@ -45,35 +45,41 @@ class DatabaseManager:
         # For fetch_one/fetch_all, result is data or None.
         # For other operations (like CREATE), result is True/False.
         try:
-            # Use a context manager for the connection
-            with sqlite3.connect(
+            # Create connection explicitly to ensure we can close it properly
+            conn = sqlite3.connect(
                 self.db_path, timeout=self.timeout, check_same_thread=False
-            ) as conn:
-                conn.execute("PRAGMA foreign_keys = ON;")
-                # Enable row factory for named column access when requested
-                if use_row_factory:
-                    conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(query, params)
+            )
+            conn.execute("PRAGMA foreign_keys = ON;")
+            # Enable row factory for named column access when requested
+            if use_row_factory:
+                conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(query, params)
 
-                if commit:
-                    conn.commit()
-                    result = cursor.rowcount  # Return actual rowcount
-                elif fetch_one:
-                    result = cursor.fetchone()
-                elif fetch_all:
-                    result = cursor.fetchall()
-                else:
-                    # For non-commit, non-fetch queries (like CREATE TABLE)
-                    result = True
+            if commit:
+                conn.commit()
+                result = cursor.rowcount  # Return actual rowcount
+            elif fetch_one:
+                result = cursor.fetchone()
+            elif fetch_all:
+                result = cursor.fetchall()
+            else:
+                # For non-commit, non-fetch queries (like CREATE TABLE)
+                result = True
             return result
-
         except sqlite3.Error as e:
             logging.error(f"Database error: {e} | Query: {query} | Params: {params}")
             if commit:
                 return -1  # Special value for error in commit operation
             return None if fetch_one or fetch_all else False
-        # No finally needed, 'with' handles closing
+        finally:
+            # CRITICAL: Explicitly close connection in finally block to ensure FD is released
+            # SQLite connections may not release FDs immediately when context manager exits
+            if conn:
+                try:
+                    conn.close()
+                except Exception as close_err:
+                    logging.debug(f"Error closing DB connection: {close_err}")
 
     async def _run_sync_db_operation(self, func, *args):
         """Runs synchronous DB functions in a separate thread."""
@@ -378,7 +384,10 @@ class DatabaseManager:
                    ORDER BY block_number DESC, timestamp DESC
                    LIMIT ?"""
         results = self._execute_db_query(
-            query, (monitored_address.lower(), limit), fetch_all=True, use_row_factory=True
+            query,
+            (monitored_address.lower(), limit),
+            fetch_all=True,
+            use_row_factory=True,
         )
         if not results:
             return []
@@ -517,7 +526,10 @@ class DatabaseManager:
             LIMIT ?
         """
         results = self._execute_db_query(
-            query, (user_id, min_risk_score, limit), fetch_all=True, use_row_factory=True
+            query,
+            (user_id, min_risk_score, limit),
+            fetch_all=True,
+            use_row_factory=True,
         )
         if not results:
             return []
