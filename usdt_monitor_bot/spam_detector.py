@@ -616,13 +616,10 @@ class SpamDetector:
 
         # ========== FILTER 3: Timing + Address Similarity ==========
         last_tx_checked_for_similarity = False
-        timing_triggered = False
-        time_since_prev = None
         
         if historical_transactions:
             last_tx = historical_transactions[-1]
             time_delta = (tx.timestamp - last_tx.timestamp).total_seconds()
-            time_since_prev = int(time_delta)
             
             # Log timing context
             SpamDebuggingLogger.log_timing_context(
@@ -639,7 +636,6 @@ class SpamDetector:
                 flags.add(RiskFlag.TIMING_SUSPICIOUS)
                 score_breakdown["TIMING_SUSPICIOUS"] = self.config["timing_weight"]
                 details["time_since_prev_tx_seconds"] = int(time_delta)
-                timing_triggered = True
 
                 # Check address similarity with last sender
                 similarity = self.calculate_address_similarity(

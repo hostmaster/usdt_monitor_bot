@@ -60,7 +60,7 @@ def test_debug_logging_filter_evaluation(caplog):
     )
     
     with caplog.at_level(logging.DEBUG):
-        analysis = detector.analyze_transaction(tx, [])
+        detector.analyze_transaction(tx, [])
     
     # Check that debug logs were generated
     log_text = caplog.text
@@ -88,7 +88,7 @@ def test_debug_logging_bypass_case(caplog):
     )
     
     with caplog.at_level(logging.WARNING):
-        analysis = detector.analyze_transaction(tx, [])
+        detector.analyze_transaction(tx, [])
     
     log_text = caplog.text
     # Should see bypass case in logs or verdict
@@ -99,8 +99,6 @@ def test_debug_logging_bypass_case(caplog):
 def test_debug_logging_similarity(caplog):
     """Test detailed similarity analysis logging."""
     enable_spam_detector_debugging()
-    
-    detector = SpamDetector()
     
     # Log similarity analysis
     with caplog.at_level(logging.DEBUG):
@@ -132,7 +130,7 @@ def test_debug_logging_disabled_by_default():
     assert SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG == 45
     
     # Create detector without enabling debug - should not change state
-    detector = SpamDetector()
+    SpamDetector()
     
     # State should still be disabled
     assert SpamDebuggingLogger.DEBUG_ENABLED is False

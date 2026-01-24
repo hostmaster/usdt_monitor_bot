@@ -29,7 +29,6 @@ from usdt_monitor_bot.etherscan import (
 from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import (
     RiskAnalysis,
-    SpamDebuggingLogger,
     SpamDetector,
     TransactionMetadata,
 )
