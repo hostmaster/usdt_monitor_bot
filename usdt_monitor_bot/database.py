@@ -53,19 +53,21 @@ class DatabaseManager:
             # Enable row factory for named column access when requested
             if use_row_factory:
                 conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(query, params)
+            
+            # Use context manager for cursor to ensure explicit lifecycle management
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
 
-            if commit:
-                conn.commit()
-                result = cursor.rowcount  # Return actual rowcount
-            elif fetch_one:
-                result = cursor.fetchone()
-            elif fetch_all:
-                result = cursor.fetchall()
-            else:
-                # For non-commit, non-fetch queries (like CREATE TABLE)
-                result = True
+                if commit:
+                    conn.commit()
+                    result = cursor.rowcount  # Return actual rowcount
+                elif fetch_one:
+                    result = cursor.fetchone()
+                elif fetch_all:
+                    result = cursor.fetchall()
+                else:
+                    # For non-commit, non-fetch queries (like CREATE TABLE)
+                    result = True
             return result
         except sqlite3.Error as e:
             logging.error(f"Database error: {e} | Query: {query} | Params: {params}")
