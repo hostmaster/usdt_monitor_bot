@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 ### New Class: SpamDebuggingLogger (lines ~21-300)
 
-Complete logging utility with 7 static methods:
+Complete logging utility with 8 static methods:
 
 1. **enable_debug_logging(min_score)** - Enable debug mode
 2. **log_analysis_decision()** - Log final spam verdict
