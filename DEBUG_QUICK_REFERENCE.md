@@ -75,18 +75,18 @@ grep "$TX" debug.log | grep BYPASS_CASE
 
 For transaction `0xabc12def` bypassing detection:
 
+**Log Output:**
 ```
 [FILTER] 0xabc12def DUST_AMOUNT       ✓ +30    (value < $1)
 [FILTER] 0xabc12def TIMING_SUSPICIOUS ✓ +25    (within 20 min)
 [FILTER] 0xabc12def SIMILAR_ADDRESS   ✗ +0     (not similar enough)
-Score: 30+25=55 BUT threshold=50 so NOT suspicious
-
-Wait, if score=55 it should be suspicious! Let me check verdict:
 [SPAM_VERDICT] 0xabc12def score=45/50 suspicious=False
-
-Ah! The actual score is 45, not 55. This means one filter didn't trigger.
-Check which filter has issue...
 ```
+
+**Debugging Thought Process:**
+> "I see DUST_AMOUNT (+30) and TIMING_SUSPICIOUS (+25) triggered, so I manually calculate: 30+25=55. Since the threshold is 50, this should be suspicious! But the verdict shows score=45/50 and suspicious=False. This means my manual calculation was wrong - the actual score is 45, not 55. One of those filters must not have actually contributed the full weight, or there's another factor reducing the score. Let me check the detailed logs to see what happened..."
+
+This demonstrates how the debug logs help identify discrepancies between expected and actual behavior.
 
 ## Filter Weights (Default)
 
