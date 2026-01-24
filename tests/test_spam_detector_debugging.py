@@ -62,10 +62,13 @@ def test_debug_logging_filter_evaluation(caplog):
     with caplog.at_level(logging.DEBUG):
         detector.analyze_transaction(tx, [])
     
-    # Check that debug logs were generated
+    # Check that filter evaluation logs were generated
     log_text = caplog.text
-    assert "[FILTER]" in log_text or "[SPAM_VERDICT]" in log_text
+    assert "[FILTER]" in log_text, "Filter evaluation logging should be present when debug enabled"
+    assert "DUST_AMOUNT" in log_text, "DUST_AMOUNT filter should be evaluated for dust transaction"
     assert "debugtest" in log_text  # Our tx hash appears
+    # Also verify verdict is logged
+    assert "[SPAM_VERDICT]" in log_text
 
 
 def test_debug_logging_bypass_case(caplog):
