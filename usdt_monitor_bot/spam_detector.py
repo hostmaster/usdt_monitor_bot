@@ -9,6 +9,7 @@ Research-based detection thresholds:
 - Risk score threshold: >= 50/100
 """
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -18,6 +19,288 @@ from typing import Dict, List, Optional, Set
 
 # Ethereum address validation pattern (hex characters only)
 ETH_HEX_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+# Create logger for spam detector
+logger = logging.getLogger(__name__)
+
+
+class SpamDebuggingLogger:
+    """
+    Instrumentation for reverse debugging spam bypass cases.
+    
+    Provides structured logging with full context for analyzing transactions
+    that unexpectedly bypass spam detection or fail to reach expected scores.
+    """
+
+    # Enable detailed debugging via environment or config
+    DEBUG_ENABLED = False
+    MIN_SCORE_FOR_DEBUG = 45  # Log transactions scoring close to threshold
+
+    @staticmethod
+    def enable_debug_logging(min_score: int = 45) -> None:
+        """Enable detailed spam bypass debugging."""
+        SpamDebuggingLogger.DEBUG_ENABLED = True
+        SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG = min_score
+
+    @staticmethod
+    def _truncate_addr(addr: str, length: int = 10) -> str:
+        """Truncate address for compact logging."""
+        addr_norm = addr.lower().replace("0x", "")
+        return addr_norm[:length] if addr_norm else "unknown"
+
+    @staticmethod
+    def log_analysis_decision(
+        tx_hash: str,
+        score: int,
+        is_suspicious: bool,
+        flags: List,
+        threshold: int,
+    ) -> None:
+        """
+        Log key decision point: whether transaction passed or failed spam detection.
+        
+        Args:
+            tx_hash: Transaction hash
+            score: Final risk score
+            is_suspicious: Whether marked as spam
+            flags: List of detected risk flags
+            threshold: Spam detection threshold
+        """
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+
+        tx_short = tx_hash[:16]
+        flag_names = [f.value for f in flags] if flags else ["NONE"]
+        
+        logger.debug(
+            f"[SPAM_VERDICT] {tx_short}: score={score}/{threshold} "
+            f"suspicious={is_suspicious} flags={','.join(flag_names)}"
+        )
+
+    @staticmethod
+    def log_filter_evaluation(
+        tx_hash: str,
+        from_addr: str,
+        filter_name: str,
+        triggered: bool,
+        score_delta: int,
+        details: Dict = None,
+    ) -> None:
+        """
+        Log evaluation of each spam filter for this transaction.
+        
+        Args:
+            tx_hash: Transaction hash
+            from_addr: Sender address
+            filter_name: Name of filter (e.g., "DUST_AMOUNT", "SIMILAR_ADDRESS")
+            triggered: Whether filter was triggered
+            score_delta: Score added by this filter
+            details: Additional context about filter evaluation
+        """
+        if not SpamDebuggingLogger.DEBUG_ENABLED:
+            return
+
+        addr_short = SpamDebuggingLogger._truncate_addr(from_addr)
+        tx_short = tx_hash[:16]
+        
+        status = "✓ TRIGGERED" if triggered else "✗ passed"
+        detail_str = f" ({details})" if details else ""
+        
+        logger.debug(
+            f"[FILTER] {tx_short} {filter_name:25} {status:15} "
+            f"+{score_delta:3} | from={addr_short}{detail_str}"
+        )
+
+    @staticmethod
+    def log_similarity_analysis(
+        tx_hash: str,
+        from_addr: str,
+        to_addr: str,
+        reference_addr: str,
+        prefix_match: int,
+        suffix_match: int,
+        prefix_threshold: int,
+        suffix_threshold: int,
+        is_similar: bool,
+    ) -> None:
+        """
+        Log detailed address similarity analysis for debugging.
+        
+        Args:
+            tx_hash: Transaction hash
+            from_addr: Sender address being checked
+            to_addr: Recipient address
+            reference_addr: Address being compared against
+            prefix_match: Number of matching prefix characters
+            suffix_match: Number of matching suffix characters
+            prefix_threshold: Configured prefix threshold
+            suffix_threshold: Configured suffix threshold
+            is_similar: Whether addresses deemed similar
+        """
+        if not SpamDebuggingLogger.DEBUG_ENABLED:
+            return
+
+        from_short = SpamDebuggingLogger._truncate_addr(from_addr, 6)
+        ref_short = SpamDebuggingLogger._truncate_addr(reference_addr, 6)
+        tx_short = tx_hash[:12]
+        
+        verdict = "SIMILAR" if is_similar else "different"
+        
+        logger.debug(
+            f"[SIMILARITY] {tx_short} {verdict:10} | "
+            f"from={from_short} vs ref={ref_short} | "
+            f"prefix: {prefix_match}/{prefix_threshold} | "
+            f"suffix: {suffix_match}/{suffix_threshold}"
+        )
+
+    @staticmethod
+    def log_whitelist_check(
+        tx_hash: str,
+        from_addr: str,
+        to_addr: str,
+        whitelisted_from: bool,
+        whitelisted_to: bool,
+        from_is_monitored: bool,
+    ) -> None:
+        """
+        Log whitelist evaluation for transaction.
+        
+        Args:
+            tx_hash: Transaction hash
+            from_addr: Sender address
+            to_addr: Recipient address
+            whitelisted_from: Whether sender is whitelisted
+            whitelisted_to: Whether recipient is whitelisted
+            from_is_monitored: Whether sender is the monitored address
+        """
+        if not SpamDebuggingLogger.DEBUG_ENABLED:
+            return
+
+        from_short = SpamDebuggingLogger._truncate_addr(from_addr)
+        to_short = SpamDebuggingLogger._truncate_addr(to_addr)
+        tx_short = tx_hash[:12]
+        
+        checks = []
+        if whitelisted_from:
+            checks.append("FROM_WHITELISTED")
+        if whitelisted_to:
+            checks.append("TO_WHITELISTED")
+        if from_is_monitored:
+            checks.append("FROM_MONITORED")
+        
+        status = f"[{','.join(checks)}]" if checks else "NONE"
+        
+        logger.debug(
+            f"[WHITELIST] {tx_short} {status:35} "
+            f"from={from_short} to={to_short}"
+        )
+
+    @staticmethod
+    def log_timing_context(
+        tx_hash: str,
+        time_since_prev_tx: Optional[int],
+        timing_window: int,
+        timing_triggered: bool,
+        historical_count: int,
+    ) -> None:
+        """
+        Log timing analysis context for spam detection.
+        
+        Args:
+            tx_hash: Transaction hash
+            time_since_prev_tx: Seconds since last transaction (None if no history)
+            timing_window: Configured timing window in seconds
+            timing_triggered: Whether timing filter was triggered
+            historical_count: Number of historical transactions available
+        """
+        if not SpamDebuggingLogger.DEBUG_ENABLED:
+            return
+
+        tx_short = tx_hash[:12]
+        
+        if time_since_prev_tx is not None:
+            time_str = f"{time_since_prev_tx}s"
+            in_window = "IN" if timing_triggered else "OUT"
+            logger.debug(
+                f"[TIMING] {tx_short} last_tx={time_str:6} window={timing_window}s "
+                f"[{in_window}_WINDOW] history={historical_count}"
+            )
+        else:
+            logger.debug(
+                f"[TIMING] {tx_short} no_previous_tx history={historical_count}"
+            )
+
+    @staticmethod
+    def log_score_accumulation(
+        tx_hash: str,
+        from_addr: str,
+        final_score: int,
+        threshold: int,
+        score_breakdown: Dict[str, int],
+    ) -> None:
+        """
+        Log final score accumulation with breakdown.
+        
+        Args:
+            tx_hash: Transaction hash
+            from_addr: Sender address
+            final_score: Final score after capping
+            threshold: Spam detection threshold
+            score_breakdown: Dictionary of filter_name -> score_contributed
+        """
+        if final_score < SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG:
+            return
+
+        addr_short = SpamDebuggingLogger._truncate_addr(from_addr)
+        tx_short = tx_hash[:12]
+        
+        breakdown = " + ".join(
+            [f"{name}({score})" for name, score in score_breakdown.items() if score > 0]
+        ) or "NONE"
+        
+        logger.info(
+            f"[SCORE_CLOSE_TO_THRESHOLD] {tx_short} score={final_score}/{threshold} "
+            f"from={addr_short} breakdown: {breakdown}"
+        )
+
+    @staticmethod
+    def log_bypass_case(
+        tx_hash: str,
+        from_addr: str,
+        to_addr: str,
+        value: Decimal,
+        score: int,
+        threshold: int,
+        triggered_flags: List,
+        reason: str,
+    ) -> None:
+        """
+        Log cases where transaction bypassed spam detection unexpectedly.
+        
+        Called when:
+        - Transaction has multiple risk flags but score stays below threshold
+        - Transaction has high-risk indicators but wasn't flagged
+        
+        Args:
+            tx_hash: Transaction hash
+            from_addr: Sender address
+            to_addr: Recipient address
+            value: Transaction value in USDT
+            score: Final risk score
+            threshold: Spam detection threshold
+            triggered_flags: List of detected flags
+            reason: Human-readable reason for bypass
+        """
+        from_short = SpamDebuggingLogger._truncate_addr(from_addr)
+        to_short = SpamDebuggingLogger._truncate_addr(to_addr)
+        tx_short = tx_hash[:12]
+        flag_list = ",".join([f.value for f in triggered_flags]) if triggered_flags else "NONE"
+        
+        logger.warning(
+            f"[SPAM_BYPASS_CASE] {tx_short} from={from_short} to={to_short} "
+            f"value={value:.2f} score={score}/{threshold} flags=[{flag_list}] "
+            f"reason={reason}"
+        )
 
 
 class RiskFlag(Enum):
@@ -78,16 +361,22 @@ class RiskAnalysis:
 class SpamDetector:
     """Main spam/malicious transaction detector"""
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, enable_debug_logging: bool = False):
         """
         Initialize detector with configuration
 
         Args:
             config: Dictionary with detection thresholds
+            enable_debug_logging: Whether to enable detailed spam bypass debugging
         """
         self.config = self._default_config()
         if config:
             self.config.update(config)
+        
+        if enable_debug_logging:
+            SpamDebuggingLogger.enable_debug_logging(
+                min_score=self.config.get("suspicious_score_threshold", 50) - 5
+            )
 
     @staticmethod
     def _default_config() -> Dict:
@@ -248,6 +537,17 @@ class SpamDetector:
         # 2. If TO is in whitelist (token contracts) -> whitelist
         # 3. If FROM is the monitored address -> whitelist (outgoing from user)
         # 4. If TO is the monitored address AND FROM is not whitelisted -> DO NOT whitelist (incoming spam check)
+        
+        # Log whitelist checks
+        SpamDebuggingLogger.log_whitelist_check(
+            tx.tx_hash,
+            tx.from_address,
+            tx.to_address,
+            tx_from_normalized in whitelist_normalized,
+            tx_to_normalized in whitelist_normalized,
+            monitored_normalized and tx_from_normalized == monitored_normalized,
+        )
+        
         if tx_from_normalized in whitelist_normalized:
             return self._create_whitelisted_result(
                 "Whitelisted sender address - Low risk transaction",
@@ -267,44 +567,124 @@ class SpamDetector:
         score = 0
         flags: Set[RiskFlag] = set()
         details = {}
+        score_breakdown: Dict[str, int] = {}
 
         # ========== FILTER 1: Value Threshold ==========
         if Decimal("0") < tx.value < Decimal(str(self.config["dust_threshold_usd"])):
             score += self.config["dust_risk_weight"]
             flags.add(RiskFlag.DUST_AMOUNT)
             details["dust_amount"] = float(tx.value)
+            score_breakdown["DUST_AMOUNT"] = self.config["dust_risk_weight"]
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "DUST_AMOUNT",
+                True,
+                self.config["dust_risk_weight"],
+                f"value={float(tx.value):.2f}",
+            )
+        else:
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "DUST_AMOUNT",
+                False,
+                0,
+                f"value={float(tx.value):.2f}",
+            )
 
         # ========== FILTER 2: Zero-Value Transfer ==========
         if tx.value == Decimal("0"):
             score += self.config["zero_value_weight"]
             flags.add(RiskFlag.ZERO_VALUE_TRANSFER)
+            score_breakdown["ZERO_VALUE"] = self.config["zero_value_weight"]
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "ZERO_VALUE_TRANSFER",
+                True,
+                self.config["zero_value_weight"],
+            )
+        else:
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "ZERO_VALUE_TRANSFER",
+                False,
+                0,
+            )
 
         # ========== FILTER 3: Timing + Address Similarity ==========
         last_tx_checked_for_similarity = False
+        timing_triggered = False
+        time_since_prev = None
+        
         if historical_transactions:
             last_tx = historical_transactions[-1]
             time_delta = (tx.timestamp - last_tx.timestamp).total_seconds()
+            time_since_prev = int(time_delta)
+            
+            # Log timing context
+            SpamDebuggingLogger.log_timing_context(
+                tx.tx_hash,
+                int(time_delta) if time_delta >= 0 else None,
+                self.config["suspicious_time_window"],
+                0 < time_delta < self.config["suspicious_time_window"],
+                len(historical_transactions),
+            )
 
             # Within 20 minutes of previous transaction
             if 0 < time_delta < self.config["suspicious_time_window"]:
                 score += self.config["timing_weight"]
                 flags.add(RiskFlag.TIMING_SUSPICIOUS)
+                score_breakdown["TIMING_SUSPICIOUS"] = self.config["timing_weight"]
                 details["time_since_prev_tx_seconds"] = int(time_delta)
+                timing_triggered = True
 
                 # Check address similarity with last sender
                 similarity = self.calculate_address_similarity(
                     tx.from_address, last_tx.from_address
                 )
+                
+                SpamDebuggingLogger.log_similarity_analysis(
+                    tx.tx_hash,
+                    tx.from_address,
+                    tx.to_address,
+                    last_tx.from_address,
+                    similarity.prefix_match,
+                    similarity.suffix_match,
+                    self.config["prefix_match_threshold"],
+                    self.config["suffix_match_threshold"],
+                    similarity.is_similar,
+                )
 
                 if similarity.is_similar:
                     score += self.config["similarity_weight"]
                     flags.add(RiskFlag.SIMILAR_ADDRESS)
+                    score_breakdown["SIMILAR_ADDRESS"] = self.config["similarity_weight"]
                     details["similarity_to_last"] = {
                         "prefix_match": similarity.prefix_match,
                         "suffix_match": similarity.suffix_match,
                         "is_similar": similarity.is_similar,
                     }
                     last_tx_checked_for_similarity = True
+                    SpamDebuggingLogger.log_filter_evaluation(
+                        tx.tx_hash,
+                        tx.from_address,
+                        "SIMILAR_ADDRESS",
+                        True,
+                        self.config["similarity_weight"],
+                        f"prefix={similarity.prefix_match} suffix={similarity.suffix_match}",
+                    )
+                else:
+                    SpamDebuggingLogger.log_filter_evaluation(
+                        tx.tx_hash,
+                        tx.from_address,
+                        "SIMILAR_ADDRESS",
+                        False,
+                        0,
+                        f"prefix={similarity.prefix_match} suffix={similarity.suffix_match}",
+                    )
 
             # ========== FILTER 4: Check all Recent Addresses ==========
             # Compare against last 10 transactions (broader check)
@@ -322,27 +702,90 @@ class SpamDetector:
                 similarity = self.calculate_address_similarity(
                     tx.from_address, prev_tx.from_address
                 )
+                
+                SpamDebuggingLogger.log_similarity_analysis(
+                    tx.tx_hash,
+                    tx.from_address,
+                    tx.to_address,
+                    prev_tx.from_address,
+                    similarity.prefix_match,
+                    similarity.suffix_match,
+                    self.config["prefix_match_threshold"],
+                    self.config["suffix_match_threshold"],
+                    similarity.is_similar,
+                )
 
                 if similarity.is_similar:
                     score += self.config["similarity_weight"]
                     flags.add(RiskFlag.LOOKALIKE_PREVIOUS_SENDER)
+                    score_breakdown["LOOKALIKE_SENDER"] = self.config["similarity_weight"]
                     details["lookalike_reference"] = {
                         "similar_to": prev_tx.from_address,
                         "prefix_match": similarity.prefix_match,
                         "suffix_match": similarity.suffix_match,
                     }
+                    SpamDebuggingLogger.log_filter_evaluation(
+                        tx.tx_hash,
+                        tx.from_address,
+                        "LOOKALIKE_PREVIOUS_SENDER",
+                        True,
+                        self.config["similarity_weight"],
+                        f"prefix={similarity.prefix_match} suffix={similarity.suffix_match}",
+                    )
                     break  # Don't count multiple matches
+        else:
+            SpamDebuggingLogger.log_timing_context(
+                tx.tx_hash,
+                None,
+                self.config["suspicious_time_window"],
+                False,
+                0,
+            )
 
         # ========== FILTER 5: New Address Detection ==========
         if tx.is_new_address:
             score += self.config["new_address_weight"]
             flags.add(RiskFlag.NEW_SENDER_ADDRESS)
+            score_breakdown["NEW_SENDER"] = self.config["new_address_weight"]
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "NEW_SENDER_ADDRESS",
+                True,
+                self.config["new_address_weight"],
+            )
+        else:
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "NEW_SENDER_ADDRESS",
+                False,
+                0,
+            )
 
         # ========== FILTER 6: Brand New Contract Age ==========
         if 0 <= tx.contract_age_blocks < self.config["min_blocks_for_address_age"]:
             score += self.config["brand_new_contract_weight"]
             flags.add(RiskFlag.BRAND_NEW_CONTRACT)
+            score_breakdown["BRAND_NEW_CONTRACT"] = self.config["brand_new_contract_weight"]
             details["contract_age_blocks"] = tx.contract_age_blocks
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "BRAND_NEW_CONTRACT",
+                True,
+                self.config["brand_new_contract_weight"],
+                f"age={tx.contract_age_blocks} blocks",
+            )
+        else:
+            SpamDebuggingLogger.log_filter_evaluation(
+                tx.tx_hash,
+                tx.from_address,
+                "BRAND_NEW_CONTRACT",
+                False,
+                0,
+                f"age={tx.contract_age_blocks} blocks",
+            )
 
         # ========== FILTER 7: Rapid Address Cycling ==========
         if historical_transactions:
@@ -350,7 +793,24 @@ class SpamDetector:
             if unique_senders:
                 score += self.config.get("rapid_cycling_weight", 30)
                 flags.add(RiskFlag.RAPID_ADDRESS_CYCLING)
+                score_breakdown["RAPID_CYCLING"] = self.config.get("rapid_cycling_weight", 30)
                 details["rapid_cycling_senders"] = unique_senders
+                SpamDebuggingLogger.log_filter_evaluation(
+                    tx.tx_hash,
+                    tx.from_address,
+                    "RAPID_ADDRESS_CYCLING",
+                    True,
+                    self.config.get("rapid_cycling_weight", 30),
+                    f"unique_senders={unique_senders}",
+                )
+            else:
+                SpamDebuggingLogger.log_filter_evaluation(
+                    tx.tx_hash,
+                    tx.from_address,
+                    "RAPID_ADDRESS_CYCLING",
+                    False,
+                    0,
+                )
 
         # Cap score at 100
         score = min(100, score)
@@ -360,6 +820,38 @@ class SpamDetector:
 
         # Generate recommendation
         recommendation = self._generate_recommendation(flags, score, tx)
+
+        # Log analysis decision
+        SpamDebuggingLogger.log_analysis_decision(
+            tx.tx_hash,
+            score,
+            is_suspicious,
+            flags,
+            self.config["suspicious_score_threshold"],
+        )
+
+        # Log score accumulation for debugging
+        SpamDebuggingLogger.log_score_accumulation(
+            tx.tx_hash,
+            tx.from_address,
+            score,
+            self.config["suspicious_score_threshold"],
+            score_breakdown,
+        )
+
+        # Detect and log bypass cases
+        if len(flags) > 0 and not is_suspicious:
+            reason = f"score_below_threshold ({score}/{self.config['suspicious_score_threshold']})"
+            SpamDebuggingLogger.log_bypass_case(
+                tx.tx_hash,
+                tx.from_address,
+                tx.to_address,
+                tx.value,
+                score,
+                self.config["suspicious_score_threshold"],
+                flags,
+                reason,
+            )
 
         return RiskAnalysis(
             score=score,
@@ -452,6 +944,22 @@ class SpamDetector:
 
 
 # ========== Utility Functions ==========
+
+
+def enable_spam_detector_debugging(min_score: Optional[int] = None) -> None:
+    """
+    Enable detailed debugging for spam detector bypass cases.
+    
+    Useful for analyzing why transactions bypass spam detection.
+    Call this early in application startup if debugging is needed.
+    
+    Args:
+        min_score: Minimum score to log (default: threshold - 5)
+    """
+    if min_score is None:
+        min_score = 45  # Default threshold is 50, so 45 catches near-misses
+    SpamDebuggingLogger.enable_debug_logging(min_score)
+    logging.info(f"Spam detector debugging enabled (min_score={min_score})")
 
 
 def format_risk_report(address: str, analysis: RiskAnalysis) -> str:

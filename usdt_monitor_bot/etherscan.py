@@ -26,7 +26,6 @@ from tenacity import (
 from usdt_monitor_bot.config import BotConfig
 
 
-
 class EtherscanError(Exception):
     """Base class for Etherscan API errors."""
 
@@ -104,7 +103,9 @@ class AdaptiveRateLimiter:
                 self._current_delay * self._recovery_factor, self._min_delay
             )
             if new_delay < self._current_delay:
-                logging.debug(f"Delay reduced: {self._current_delay:.2f}s->{new_delay:.2f}s")
+                logging.debug(
+                    f"Delay reduced: {self._current_delay:.2f}s->{new_delay:.2f}s"
+                )
                 self._current_delay = new_delay
                 self._consecutive_successes = 0
 
@@ -520,7 +521,9 @@ class EtherscanClient:
                 # Check for JSON-RPC error first
                 if "error" in data:
                     error = data.get("error", {})
-                    logging.debug(f"Latest block RPC error: {error.get('message', 'unknown')}")
+                    logging.debug(
+                        f"Latest block RPC error: {error.get('message', 'unknown')}"
+                    )
                     return None
 
                 # Check for result in JSON-RPC format
@@ -541,7 +544,9 @@ class EtherscanClient:
 
                     # Validate hex string contains only valid hex characters
                     hex_part = result[2:]
-                    if not hex_part or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                    if not hex_part or not all(
+                        c in "0123456789abcdefABCDEF" for c in hex_part
+                    ):
                         logging.debug(f"Invalid hex in block: {result_str}")
                         return None
 
@@ -551,7 +556,9 @@ class EtherscanClient:
                         return block_number
                     except (ValueError, TypeError) as e:
                         result_str = str(result).lower()
-                        if "rate limit" in result_str or ("rate" in result_str and "limit" in result_str):
+                        if "rate limit" in result_str or (
+                            "rate" in result_str and "limit" in result_str
+                        ):
                             raise EtherscanRateLimitError(f"Rate limit: {result}")
                         logging.debug(f"Block parse error: {e}")
                         return None
