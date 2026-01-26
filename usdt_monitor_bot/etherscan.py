@@ -279,18 +279,10 @@ class EtherscanClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close the session and connector when exiting the context.
         
-        Ensures both session and connector are closed even if one raises
-        an exception, preventing file descriptor leaks. Handles both
-        Exception and BaseException (like asyncio.CancelledError).
+        Delegates to close() to ensure consistent cleanup behavior with
+        graceful shutdown delays and proper exception handling.
         """
-        base_exception = await self._close_session_and_connector(
-            clear_session=True,
-            clear_connector=True,
-        )
-        
-        # Re-raise BaseException after cleanup is complete
-        if base_exception:
-            raise base_exception
+        await self.close()
 
     async def _make_request_with_rate_limiting(self, request_func):
         """Make an API request with adaptive rate limiting.
