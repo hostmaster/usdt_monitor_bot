@@ -177,6 +177,67 @@ class EtherscanClient:
         self._connector = connector  # Store reference for explicit cleanup
         return aiohttp.ClientSession(timeout=self._timeout, connector=connector)
 
+    async def _close_session_and_connector(
+        self,
+        clear_session: bool = True,
+        clear_connector: bool = True,
+        session_sleep: float = 0.0,
+        connector_sleep: float = 0.0,
+    ) -> Optional[BaseException]:
+        """Close session and connector with robust exception handling.
+        
+        Ensures both session and connector are closed even if one raises
+        BaseException (like asyncio.CancelledError). This prevents file
+        descriptor leaks by ensuring connector cleanup always runs.
+        
+        Args:
+            clear_session: If True, set self._session = None after closing
+            clear_connector: If True, set self._connector = None after closing
+            session_sleep: Seconds to wait after session.close() (default: 0.0)
+            connector_sleep: Seconds to wait after connector.close() (default: 0.0)
+        
+        Returns:
+            BaseException if one was raised during cleanup, None otherwise.
+            Caller should re-raise this after all cleanup operations complete.
+        """
+        base_exception_to_reraise = None
+        
+        # Close session with robust exception handling
+        if self._session:
+            try:
+                await self._session.close()
+                if session_sleep > 0:
+                    await asyncio.sleep(session_sleep)
+            except (aiohttp.ClientError, RuntimeError) as e:
+                logging.debug(f"Session close error: {e}")
+            except Exception as e:
+                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
+            except BaseException as e:
+                # Store to re-raise after connector cleanup
+                base_exception_to_reraise = e
+            finally:
+                if clear_session:
+                    self._session = None
+        
+        # Explicitly close connector to ensure file descriptors are released
+        # This must run even if session.close() raised BaseException
+        if self._connector:
+            try:
+                await self._connector.close()
+                if connector_sleep > 0:
+                    await asyncio.sleep(connector_sleep)
+            except Exception as e:
+                logging.debug(f"Connector close error: {e}")
+            except BaseException as e:
+                # If connector also raises BaseException, prefer it
+                # (connector cleanup is critical for FD release)
+                base_exception_to_reraise = e
+            finally:
+                if clear_connector:
+                    self._connector = None
+        
+        return base_exception_to_reraise
+
     async def _ensure_session(self):
         """Ensure a session exists, creating one if necessary.
 
@@ -193,37 +254,15 @@ class EtherscanClient:
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
                 # Close old session and connector before creating new one
-                # Use try/except/finally to ensure connector cleanup runs even if
-                # session.close() raises BaseException (like CancelledError)
-                session_base_exception = None
-                
-                # Close session - wrap in try/except to ensure connector cleanup runs
-                if self._session:
-                    try:
-                        await self._session.close()
-                    except Exception as e:
-                        logging.debug(f"Session close error: {e}")
-                    except BaseException as e:
-                        # Store to re-raise after connector cleanup
-                        session_base_exception = e
-                
-                # Explicitly close connector to ensure file descriptors are released
-                # This must run even if session.close() raised BaseException
-                if self._connector:
-                    try:
-                        await self._connector.close()
-                    except Exception as e:
-                        logging.debug(f"Connector close error: {e}")
-                    except BaseException as e:
-                        # If connector also raises BaseException, prefer it
-                        # (connector cleanup is critical for FD release)
-                        session_base_exception = e
-                    finally:
-                        self._connector = None
+                # Don't clear session here (we'll replace it), but clear connector
+                base_exception = await self._close_session_and_connector(
+                    clear_session=False,
+                    clear_connector=True,
+                )
                 
                 # Re-raise BaseException after cleanup is complete
-                if session_base_exception:
-                    raise session_base_exception
+                if base_exception:
+                    raise base_exception
                 
                 self._session = self._create_session()
 
@@ -244,38 +283,14 @@ class EtherscanClient:
         an exception, preventing file descriptor leaks. Handles both
         Exception and BaseException (like asyncio.CancelledError).
         """
-        # Store BaseException to re-raise after cleanup
-        base_exception_to_reraise = None
-        
-        # Close session - wrap in try/except to ensure connector cleanup runs
-        if self._session:
-            try:
-                await self._session.close()
-            except Exception as e:
-                logging.debug(f"Session close error in __aexit__: {e}")
-            except BaseException as e:
-                # Store to re-raise after connector cleanup
-                base_exception_to_reraise = e
-            finally:
-                self._session = None
-        
-        # Explicitly close connector to ensure file descriptors are released
-        # This must run even if session.close() raised BaseException
-        if self._connector:
-            try:
-                await self._connector.close()
-            except Exception as e:
-                logging.debug(f"Connector close error in __aexit__: {e}")
-            except BaseException as e:
-                # If connector also raises BaseException, prefer it
-                # (connector cleanup is critical for FD release)
-                base_exception_to_reraise = e
-            finally:
-                self._connector = None
+        base_exception = await self._close_session_and_connector(
+            clear_session=True,
+            clear_connector=True,
+        )
         
         # Re-raise BaseException after cleanup is complete
-        if base_exception_to_reraise:
-            raise base_exception_to_reraise
+        if base_exception:
+            raise base_exception
 
     async def _make_request_with_rate_limiting(self, request_func):
         """Make an API request with adaptive rate limiting.
@@ -566,43 +581,13 @@ class EtherscanClient:
         are released. Uses try/finally to ensure cleanup happens even if
         exceptions are raised during close operations.
         """
-        # Store BaseException to re-raise after cleanup
-        base_exception_to_reraise = None
-        
-        # Close session - use finally to ensure cleanup happens even on exception
-        if self._session:
-            try:
-                await self._session.close()
-                # Brief wait for graceful connection cleanup
-                await asyncio.sleep(0.1)
-            except (aiohttp.ClientError, RuntimeError) as e:
-                logging.debug(f"Session close: {e}")
-            except Exception as e:
-                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
-            except BaseException as e:
-                # Store to re-raise after connector cleanup
-                base_exception_to_reraise = e
-            finally:
-                self._session = None
-        
-        # Explicitly close connector to ensure file descriptors are released
-        # This must run even if session.close() raised BaseException
-        # This is critical because even after session.close(), FDs may not be
-        # immediately released without explicit connector cleanup
-        if self._connector:
-            try:
-                await self._connector.close()
-                # Additional wait for connector cleanup
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                logging.debug(f"Connector close error: {e}")
-            except BaseException as e:
-                # If connector also raises BaseException, prefer it
-                # (connector cleanup is critical for FD release)
-                base_exception_to_reraise = e
-            finally:
-                self._connector = None
+        base_exception = await self._close_session_and_connector(
+            clear_session=True,
+            clear_connector=True,
+            session_sleep=0.1,  # Brief wait for graceful connection cleanup
+            connector_sleep=0.1,  # Additional wait for connector cleanup
+        )
         
         # Re-raise BaseException after cleanup is complete
-        if base_exception_to_reraise:
-            raise base_exception_to_reraise
+        if base_exception:
+            raise base_exception
