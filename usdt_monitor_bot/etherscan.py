@@ -566,6 +566,9 @@ class EtherscanClient:
         are released. Uses try/finally to ensure cleanup happens even if
         exceptions are raised during close operations.
         """
+        # Store BaseException to re-raise after cleanup
+        base_exception_to_reraise = None
+        
         # Close session - use finally to ensure cleanup happens even on exception
         if self._session:
             try:
@@ -576,15 +579,14 @@ class EtherscanClient:
                 logging.debug(f"Session close: {e}")
             except Exception as e:
                 logging.warning(f"Unexpected session close error: {e}", exc_info=True)
-            except BaseException:
-                # Re-raise BaseException (like CancelledError) after cleanup
-                # The finally block ensures cleanup happens
-                raise
+            except BaseException as e:
+                # Store to re-raise after connector cleanup
+                base_exception_to_reraise = e
             finally:
                 self._session = None
         
         # Explicitly close connector to ensure file descriptors are released
-        # This must run even if session.close() raised an exception
+        # This must run even if session.close() raised BaseException
         # This is critical because even after session.close(), FDs may not be
         # immediately released without explicit connector cleanup
         if self._connector:
@@ -594,9 +596,13 @@ class EtherscanClient:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logging.debug(f"Connector close error: {e}")
-            except BaseException:
-                # Re-raise BaseException (like CancelledError) after cleanup
-                # The finally block ensures cleanup happens
-                raise
+            except BaseException as e:
+                # If connector also raises BaseException, prefer it
+                # (connector cleanup is critical for FD release)
+                base_exception_to_reraise = e
             finally:
                 self._connector = None
+        
+        # Re-raise BaseException after cleanup is complete
+        if base_exception_to_reraise:
+            raise base_exception_to_reraise
