@@ -221,7 +221,8 @@ class EtherscanClient:
         """Close the session and connector when exiting the context.
         
         Ensures both session and connector are closed even if one raises
-        an exception, preventing file descriptor leaks.
+        an exception, preventing file descriptor leaks. Handles both
+        Exception and BaseException (like asyncio.CancelledError).
         """
         # Close session - wrap in try/except to ensure connector cleanup runs
         if self._session:
@@ -229,6 +230,10 @@ class EtherscanClient:
                 await self._session.close()
             except Exception as e:
                 logging.debug(f"Session close error in __aexit__: {e}")
+            except BaseException:
+                # Re-raise BaseException (like CancelledError) after cleanup
+                # The finally block ensures cleanup happens
+                raise
             finally:
                 self._session = None
         
@@ -239,6 +244,10 @@ class EtherscanClient:
                 await self._connector.close()
             except Exception as e:
                 logging.debug(f"Connector close error in __aexit__: {e}")
+            except BaseException:
+                # Re-raise BaseException (like CancelledError) after cleanup
+                # The finally block ensures cleanup happens
+                raise
             finally:
                 self._connector = None
 
@@ -541,6 +550,10 @@ class EtherscanClient:
                 logging.debug(f"Session close: {e}")
             except Exception as e:
                 logging.warning(f"Unexpected session close error: {e}", exc_info=True)
+            except BaseException:
+                # Re-raise BaseException (like CancelledError) after cleanup
+                # The finally block ensures cleanup happens
+                raise
             finally:
                 self._session = None
         
@@ -555,5 +568,9 @@ class EtherscanClient:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logging.debug(f"Connector close error: {e}")
+            except BaseException:
+                # Re-raise BaseException (like CancelledError) after cleanup
+                # The finally block ensures cleanup happens
+                raise
             finally:
                 self._connector = None
