@@ -218,17 +218,29 @@ class EtherscanClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Close the session when exiting the context."""
+        """Close the session and connector when exiting the context.
+        
+        Ensures both session and connector are closed even if one raises
+        an exception, preventing file descriptor leaks.
+        """
+        # Close session - wrap in try/except to ensure connector cleanup runs
         if self._session:
-            await self._session.close()
-            self._session = None
+            try:
+                await self._session.close()
+            except Exception as e:
+                logging.debug(f"Session close error in __aexit__: {e}")
+            finally:
+                self._session = None
+        
         # Explicitly close connector to ensure file descriptors are released
+        # This must run even if session.close() raised an exception
         if self._connector:
             try:
                 await self._connector.close()
             except Exception as e:
-                logging.debug(f"Connector close error: {e}")
-            self._connector = None
+                logging.debug(f"Connector close error in __aexit__: {e}")
+            finally:
+                self._connector = None
 
     async def _make_request_with_rate_limiting(self, request_func):
         """Make an API request with adaptive rate limiting.
@@ -516,9 +528,10 @@ class EtherscanClient:
         """Close the session and connector if they exist.
 
         Explicitly closes both session and connector to ensure file descriptors
-        are released. While session.close() should close the connector automatically,
-        explicit connector.close() ensures immediate FD release.
+        are released. Uses try/finally to ensure cleanup happens even if
+        exceptions are raised during close operations.
         """
+        # Close session - use finally to ensure cleanup happens even on exception
         if self._session:
             try:
                 await self._session.close()
@@ -528,9 +541,11 @@ class EtherscanClient:
                 logging.debug(f"Session close: {e}")
             except Exception as e:
                 logging.warning(f"Unexpected session close error: {e}", exc_info=True)
-            self._session = None
+            finally:
+                self._session = None
         
         # Explicitly close connector to ensure file descriptors are released
+        # This must run even if session.close() raised an exception
         # This is critical because even after session.close(), FDs may not be
         # immediately released without explicit connector cleanup
         if self._connector:
@@ -540,4 +555,5 @@ class EtherscanClient:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logging.debug(f"Connector close error: {e}")
-            self._connector = None
+            finally:
+                self._connector = None
