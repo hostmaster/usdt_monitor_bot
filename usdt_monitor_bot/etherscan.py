@@ -208,8 +208,26 @@ class EtherscanClient:
                 self._session = self._create_session()
 
     async def __aenter__(self):
-        """Create a new session when entering the context."""
-        # _create_session() already stores connector in self._connector
+        """Create a new session when entering the context.
+        
+        Closes any existing session and connector before creating a new one
+        to prevent resource leaks when an instance is reused.
+        """
+        # Close existing session and connector if they exist
+        # This prevents resource leaks when an instance is reused
+        if self._session:
+            try:
+                await self._session.close()
+            except Exception as e:
+                logging.debug(f"Session close error in __aenter__: {e}")
+        # Explicitly close connector to ensure file descriptors are released
+        if self._connector:
+            try:
+                await self._connector.close()
+            except Exception as e:
+                logging.debug(f"Connector close error in __aenter__: {e}")
+            self._connector = None
+        # _create_session() stores connector in self._connector
         self._session = self._create_session()
         return self
 
