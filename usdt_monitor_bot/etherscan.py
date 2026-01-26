@@ -244,32 +244,38 @@ class EtherscanClient:
         an exception, preventing file descriptor leaks. Handles both
         Exception and BaseException (like asyncio.CancelledError).
         """
+        # Store BaseException to re-raise after cleanup
+        base_exception_to_reraise = None
+        
         # Close session - wrap in try/except to ensure connector cleanup runs
         if self._session:
             try:
                 await self._session.close()
             except Exception as e:
                 logging.debug(f"Session close error in __aexit__: {e}")
-            except BaseException:
-                # Re-raise BaseException (like CancelledError) after cleanup
-                # The finally block ensures cleanup happens
-                raise
+            except BaseException as e:
+                # Store to re-raise after connector cleanup
+                base_exception_to_reraise = e
             finally:
                 self._session = None
         
         # Explicitly close connector to ensure file descriptors are released
-        # This must run even if session.close() raised an exception
+        # This must run even if session.close() raised BaseException
         if self._connector:
             try:
                 await self._connector.close()
             except Exception as e:
                 logging.debug(f"Connector close error in __aexit__: {e}")
-            except BaseException:
-                # Re-raise BaseException (like CancelledError) after cleanup
-                # The finally block ensures cleanup happens
-                raise
+            except BaseException as e:
+                # If connector also raises BaseException, prefer it
+                # (connector cleanup is critical for FD release)
+                base_exception_to_reraise = e
             finally:
                 self._connector = None
+        
+        # Re-raise BaseException after cleanup is complete
+        if base_exception_to_reraise:
+            raise base_exception_to_reraise
 
     async def _make_request_with_rate_limiting(self, request_func):
         """Make an API request with adaptive rate limiting.
