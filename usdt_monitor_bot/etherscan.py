@@ -226,8 +226,10 @@ class EtherscanClient:
                 await self._connector.close()
                 if connector_sleep > 0:
                     await asyncio.sleep(connector_sleep)
-            except Exception as e:
+            except (aiohttp.ClientError, RuntimeError) as e:
                 logging.debug(f"Connector close error: {e}")
+            except Exception as e:
+                logging.warning(f"Unexpected connector close error: {e}", exc_info=True)
             except BaseException as e:
                 # If connector also raises BaseException, prefer it
                 # (connector cleanup is critical for FD release)
