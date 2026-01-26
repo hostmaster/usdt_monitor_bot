@@ -193,18 +193,38 @@ class EtherscanClient:
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
                 # Close old session and connector before creating new one
+                # Use try/except/finally to ensure connector cleanup runs even if
+                # session.close() raises BaseException (like CancelledError)
+                session_base_exception = None
+                
+                # Close session - wrap in try/except to ensure connector cleanup runs
                 if self._session:
                     try:
                         await self._session.close()
                     except Exception as e:
                         logging.debug(f"Session close error: {e}")
+                    except BaseException as e:
+                        # Store to re-raise after connector cleanup
+                        session_base_exception = e
+                
                 # Explicitly close connector to ensure file descriptors are released
+                # This must run even if session.close() raised BaseException
                 if self._connector:
                     try:
                         await self._connector.close()
                     except Exception as e:
                         logging.debug(f"Connector close error: {e}")
-                    self._connector = None
+                    except BaseException as e:
+                        # If connector also raises BaseException, prefer it
+                        # (connector cleanup is critical for FD release)
+                        session_base_exception = e
+                    finally:
+                        self._connector = None
+                
+                # Re-raise BaseException after cleanup is complete
+                if session_base_exception:
+                    raise session_base_exception
+                
                 self._session = self._create_session()
 
     async def __aenter__(self):
