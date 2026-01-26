@@ -132,6 +132,7 @@ class EtherscanClient:
         self._api_key = config.etherscan_api_key
         self._timeout = ClientTimeout(total=30)  # 30 seconds timeout
         self._session = None
+        self._connector = None  # Store connector reference for explicit cleanup
         self._session_lock = (
             asyncio.Lock()
         )  # Protect session creation from race conditions
@@ -173,7 +174,71 @@ class EtherscanClient:
             A configured ClientSession instance.
         """
         connector = self._create_connector()
+        self._connector = connector  # Store reference for explicit cleanup
         return aiohttp.ClientSession(timeout=self._timeout, connector=connector)
+
+    async def _close_session_and_connector(
+        self,
+        clear_session: bool = True,
+        clear_connector: bool = True,
+        session_sleep: float = 0.0,
+        connector_sleep: float = 0.0,
+    ) -> Optional[BaseException]:
+        """Close session and connector with robust exception handling.
+        
+        Ensures both session and connector are closed even if one raises
+        BaseException (like asyncio.CancelledError). This prevents file
+        descriptor leaks by ensuring connector cleanup always runs.
+        
+        Args:
+            clear_session: If True, set self._session = None after closing
+            clear_connector: If True, set self._connector = None after closing
+            session_sleep: Seconds to wait after session.close() (default: 0.0)
+            connector_sleep: Seconds to wait after connector.close() (default: 0.0)
+        
+        Returns:
+            BaseException if one was raised during cleanup, None otherwise.
+            Caller should re-raise this after all cleanup operations complete.
+        """
+        base_exception_to_reraise = None
+        
+        # Close session with robust exception handling
+        if self._session:
+            try:
+                await self._session.close()
+                if session_sleep > 0:
+                    await asyncio.sleep(session_sleep)
+            except (aiohttp.ClientError, RuntimeError) as e:
+                logging.debug(f"Session close error: {e}")
+            except Exception as e:
+                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
+            except BaseException as e:
+                # Store to re-raise after connector cleanup
+                base_exception_to_reraise = e
+            finally:
+                if clear_session:
+                    self._session = None
+        
+        # Explicitly close connector to ensure file descriptors are released
+        # This must run even if session.close() raised BaseException
+        if self._connector:
+            try:
+                await self._connector.close()
+                if connector_sleep > 0:
+                    await asyncio.sleep(connector_sleep)
+            except (aiohttp.ClientError, RuntimeError) as e:
+                logging.debug(f"Connector close error: {e}")
+            except Exception as e:
+                logging.warning(f"Unexpected connector close error: {e}", exc_info=True)
+            except BaseException as e:
+                # If connector also raises BaseException, prefer it
+                # (connector cleanup is critical for FD release)
+                base_exception_to_reraise = e
+            finally:
+                if clear_connector:
+                    self._connector = None
+        
+        return base_exception_to_reraise
 
     async def _ensure_session(self):
         """Ensure a session exists, creating one if necessary.
@@ -190,25 +255,36 @@ class EtherscanClient:
             # Double-check pattern: another coroutine may have created the session
             # while we were waiting for the lock
             if not self._session or getattr(self._session, "closed", True):
-                # Close old session before creating new one
-                # session.close() automatically closes the owned connector
-                if self._session:
-                    try:
-                        await self._session.close()
-                    except Exception as e:
-                        logging.debug(f"Session close error: {e}")
+                # Close old session and connector before creating new one
+                # Don't clear session here (we'll replace it), but clear connector
+                base_exception = await self._close_session_and_connector(
+                    clear_session=False,
+                    clear_connector=True,
+                )
+                
+                # Re-raise BaseException after cleanup is complete
+                if base_exception:
+                    raise base_exception
+                
                 self._session = self._create_session()
 
     async def __aenter__(self):
-        """Create a new session when entering the context."""
-        self._session = self._create_session()
+        """Ensure a session exists when entering the context.
+        
+        Uses _ensure_session() to reuse existing valid sessions or create
+        a new one if needed. This prevents resource leaks and ensures proper
+        cleanup of old sessions/connectors when an instance is reused.
+        """
+        await self._ensure_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Close the session when exiting the context."""
-        if self._session:
-            await self._session.close()
-            self._session = None
+        """Close the session and connector when exiting the context.
+        
+        Delegates to close() to ensure consistent cleanup behavior with
+        graceful shutdown delays and proper exception handling.
+        """
+        await self.close()
 
     async def _make_request_with_rate_limiting(self, request_func):
         """Make an API request with adaptive rate limiting.
@@ -493,16 +569,19 @@ class EtherscanClient:
         # We don't catch it here to allow retry mechanism to work
 
     async def close(self):
-        """Close the session if it exists.
+        """Close the session and connector if they exist.
 
-        The session.close() method automatically closes the owned connector.
+        Explicitly closes both session and connector to ensure file descriptors
+        are released. Uses try/finally to ensure cleanup happens even if
+        exceptions are raised during close operations.
         """
-        if self._session:
-            try:
-                await self._session.close()
-                await asyncio.sleep(0.1)
-            except (aiohttp.ClientError, RuntimeError) as e:
-                logging.debug(f"Session close: {e}")
-            except Exception as e:
-                logging.warning(f"Unexpected session close error: {e}", exc_info=True)
-        self._session = None
+        base_exception = await self._close_session_and_connector(
+            clear_session=True,
+            clear_connector=True,
+            session_sleep=0.1,  # Brief wait for graceful connection cleanup
+            connector_sleep=0.1,  # Additional wait for connector cleanup
+        )
+        
+        # Re-raise BaseException after cleanup is complete
+        if base_exception:
+            raise base_exception
