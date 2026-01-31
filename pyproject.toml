@@ -47,7 +47,7 @@ test = [
     "pytest-xdist==3.8.0",  # Parallel test execution
 ]
 dev = [
-    "ruff==0.14.13",           # Linter (optional)
+    "ruff==0.14.14",           # Linter (optional)
     # Add other development tools here
 ]
 security = [
