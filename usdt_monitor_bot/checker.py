@@ -17,7 +17,6 @@ from typing import List, Literal, Optional
 # Third-party
 import aiohttp
 
-
 # Local
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
@@ -84,9 +83,13 @@ class TransactionChecker:
             if "NOTOK" in error_msg:
                 logging.warning(f"API error {token_symbol}/{addr_short}: {error_msg}")
             else:
-                logging.error(f"Etherscan error {token_symbol}/{addr_short}: {error_msg}")
+                logging.error(
+                    f"Etherscan error {token_symbol}/{addr_short}: {error_msg}"
+                )
         else:
-            logging.error(f"Fetch error {token_symbol}/{addr_short}: {error}", exc_info=True)
+            logging.error(
+                f"Fetch error {token_symbol}/{addr_short}: {error}", exc_info=True
+            )
 
     async def _fetch_transactions_for_address(
         self, address_lower: str, query_start_block: int
@@ -300,7 +303,9 @@ class TransactionChecker:
 
             return historical_metadata
         except Exception as e:
-            logging.warning(f"Historical tx error for {address_lower[:8]}: {e}", exc_info=True)
+            logging.warning(
+                f"Historical tx error for {address_lower[:8]}: {e}", exc_info=True
+            )
             return []
 
     async def _get_contract_age_blocks(self, address: str, current_block: int) -> int:
@@ -456,7 +461,10 @@ class TransactionChecker:
                 risk_score=risk_score,
             )
         except Exception as e:
-            logging.warning(f"DB store failed: tx={tx_metadata.tx_hash[:16]}... err={e}", exc_info=True)
+            logging.warning(
+                f"DB store failed: tx={tx_metadata.tx_hash[:16]}... err={e}",
+                exc_info=True,
+            )
 
     async def _process_single_transaction(
         self,
@@ -484,7 +492,9 @@ class TransactionChecker:
         tx_token_symbol = tx.get("token_symbol")
 
         if not tx_hash or not tx_token_symbol:
-            logging.debug(f"Skipping tx without hash/symbol: {tx.get('hash', 'N/A')[:16]}")
+            logging.debug(
+                f"Skipping tx without hash/symbol: {tx.get('hash', 'N/A')[:16]}"
+            )
             return 0
 
         # Get token config
@@ -559,10 +569,14 @@ class TransactionChecker:
                     tx, user_ids, address_lower, historical_metadata
                 )
             except Exception as e:
-                logging.error(f"Process tx error {tx.get('hash', 'N/A')[:16]}: {e}", exc_info=True)
+                logging.error(
+                    f"Process tx error {tx.get('hash', 'N/A')[:16]}: {e}", exc_info=True
+                )
 
         if notifications_sent > 0:
-            logging.debug(f"Sent {notifications_sent} notifications for {address_lower[:8]}...")
+            logging.debug(
+                f"Sent {notifications_sent} notifications for {address_lower[:8]}..."
+            )
 
     async def _process_address_transactions(
         self,
@@ -570,7 +584,7 @@ class TransactionChecker:
         all_transactions: list[dict],
         start_block: int,
         latest_block: Optional[int] = None,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, int, int]:
         """
         Orchestrate filtering, notification, and determine the max block to update to.
 
@@ -580,7 +594,9 @@ class TransactionChecker:
             start_block: The starting block number
 
         Returns:
-            Tuple of (highest_block_number, processed_transaction_count)
+            Tuple of (highest_block_number, processed_transaction_count, max_block_in_processed_batch).
+            max_block_in_processed_batch is the highest block number among transactions we actually
+            processed (stored/notified); used so we never persist a lower block and re-notify.
         """
         if not all_transactions:
             # No transactions found - return start_block to indicate we've checked up to this point
@@ -592,7 +608,7 @@ class TransactionChecker:
                 address_lower,
                 context="no transactions found",
             )
-            return (final_block, 0)
+            return (final_block, 0, 0)
 
         # Always update to the highest block seen to avoid re-scanning
         # But cap it to latest_block if available to prevent getting ahead of blockchain
@@ -614,11 +630,18 @@ class TransactionChecker:
                 address_lower,
                 context="no transactions after filtering",
             )
-            return (result_block, 0)
+            return (result_block, 0, 0)
+
+        # Highest block among txs we are about to process; we must never persist a lower block
+        max_block_in_batch = max(
+            int(tx.get("blockNumber", 0)) for tx in processing_batch
+        )
 
         user_ids = await self._db.get_users_for_address(address_lower)
         if not user_ids:
-            logging.debug(f"No users tracking {address_lower[:8]}... ({len(processing_batch)} tx found)")
+            logging.debug(
+                f"No users tracking {address_lower[:8]}... ({len(processing_batch)} tx found)"
+            )
             processed_count = 0
         else:
             processed_count = len(processing_batch)
@@ -633,7 +656,7 @@ class TransactionChecker:
         new_last_block = self._cap_block_to_latest(
             new_last_block, latest_block, address_lower
         )
-        return (new_last_block, processed_count)
+        return (new_last_block, processed_count, max_block_in_batch)
 
     def _cap_block_to_latest(
         self,
@@ -689,7 +712,9 @@ class TransactionChecker:
         # Only advance if no transactions found to prevent getting stuck
         if not raw_transactions and new_last_block == start_block:
             final_block = start_block + 1
-            logging.warning(f"No latest block for {address_lower[:8]}..., advancing {start_block}->{final_block}")
+            logging.warning(
+                f"No latest block for {address_lower[:8]}..., advancing {start_block}->{final_block}"
+            )
         return BlockDeterminationResult(
             final_block_number=final_block,
             resetting_to_latest=False,
@@ -717,11 +742,15 @@ class TransactionChecker:
         resetting_to_latest = False
 
         if latest_block < start_block:
-            logging.warning(f"DB ahead of chain for {address_lower[:8]}...: {start_block}->{latest_block}")
+            logging.warning(
+                f"DB ahead of chain for {address_lower[:8]}...: {start_block}->{latest_block}"
+            )
             return latest_block, True
 
         if new_last_block > latest_block:
-            logging.warning(f"Block cap for {address_lower[:8]}...: {new_last_block}->{latest_block}")
+            logging.warning(
+                f"Block cap for {address_lower[:8]}...: {new_last_block}->{latest_block}"
+            )
             return latest_block, True
 
         return new_last_block, resetting_to_latest
@@ -764,7 +793,9 @@ class TransactionChecker:
         # If no transactions found and blockchain hasn't advanced, update to latest
         if not raw_transactions and final_block == start_block:
             if latest_block >= start_block:
-                logging.debug(f"Advance {address_lower[:8]}... {start_block}->{latest_block}")
+                logging.debug(
+                    f"Advance {address_lower[:8]}... {start_block}->{latest_block}"
+                )
                 final_block = latest_block
 
         return BlockDeterminationResult(
@@ -795,7 +826,9 @@ class TransactionChecker:
             # Fetch latest block early to cap transaction block numbers
             latest_block = await self._etherscan.get_latest_block_number()
             if latest_block is None:
-                logging.debug(f"No latest block for {address_lower[:8]}..., proceeding without cap")
+                logging.debug(
+                    f"No latest block for {address_lower[:8]}..., proceeding without cap"
+                )
 
             raw_transactions = await self._fetch_transactions_for_address(
                 address_lower, start_block + 1
@@ -805,7 +838,11 @@ class TransactionChecker:
             if raw_transactions:
                 stats["addresses_with_transactions"] += 1
 
-            new_last_block, processed_count = await self._process_address_transactions(
+            (
+                new_last_block,
+                processed_count,
+                max_block_in_processed_batch,
+            ) = await self._process_address_transactions(
                 address_lower, raw_transactions, start_block, latest_block
             )
             stats["total_transactions_processed"] += processed_count
@@ -830,6 +867,13 @@ class TransactionChecker:
                     context="defensive check before database update",
                     log_level="warning",
                 )
+                # Never persist a block lower than the highest we already processed, or we will
+                # re-fetch and re-notify the same transactions next cycle (e.g. when API returns
+                # txs in blocks ahead of reported "latest" block)
+                if max_block_in_processed_batch > 0:
+                    final_block_to_update = max(
+                        final_block_to_update, max_block_in_processed_batch
+                    )
 
                 self._log_block_update(
                     address_lower, start_block, block_result, final_block_to_update
@@ -848,7 +892,9 @@ class TransactionChecker:
             logging.error(f"Network error {address_lower[:8]}...: {e}")
             stats["errors_count"] += 1
         except Exception as e:
-            logging.error(f"Error processing {address_lower[:8]}...: {e}", exc_info=True)
+            logging.error(
+                f"Error processing {address_lower[:8]}...: {e}", exc_info=True
+            )
             stats["errors_count"] += 1
 
     def _should_update_block(
@@ -868,7 +914,11 @@ class TransactionChecker:
         actual_block: Optional[int] = None,
     ) -> None:
         """Log block update with appropriate level."""
-        new_block = actual_block if actual_block is not None else block_result.final_block_number
+        new_block = (
+            actual_block
+            if actual_block is not None
+            else block_result.final_block_number
+        )
         addr_short = f"{address_lower[:8]}..."
         if block_result.resetting_to_latest:
             logging.info(f"Block reset {addr_short}: {start_block}->{new_block}")
