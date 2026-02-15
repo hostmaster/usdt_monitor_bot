@@ -32,7 +32,7 @@ keywords = ["telegram", "bot", "aiogram", "ethereum", "etherscan", "usdt", "cryp
 
 # Project dependencies (runtime)
 dependencies = [
-    "aiogram==3.24.0",      # Core bot framework
+    "aiogram==3.25.0",      # Core bot framework
     "apscheduler==3.11.2",  # For scheduled tasks (monitoring job)
     "python-dotenv==1.2.1", # Optional: For loading .env file locally (good practice)
     "tenacity==9.1.4"      # For retry mechanisms
