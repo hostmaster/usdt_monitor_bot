@@ -67,7 +67,7 @@ usdt_monitor_bot/
 - `docs/` - Complete documentation index
 - `docs/features/` - Feature documentation
 - `docs/guides/` - User guides and deployment
-- `docs/research/` - Research summaries and reviews
+- `docs/debug/` - Spam detector debugging and quick reference
 - `docs/examples/` - Code examples and usage scenarios
 
 ## Requirements

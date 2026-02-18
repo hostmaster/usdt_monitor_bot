@@ -191,6 +191,6 @@ echo "=== Filter Stats ===" && grep "[FILTER]" app.log | grep "✓ TRIGGERED" | 
 
 ## See Also
 
-- Full guide: `docs/SPAM_DETECTOR_DEBUGGING.md`
+- Full guide: [SPAM_DETECTOR_DEBUGGING.md](../SPAM_DETECTOR_DEBUGGING.md)
 - Implementation: `usdt_monitor_bot/spam_detector.py` → `SpamDebuggingLogger` class
 - Tests: `tests/test_spam_detector_debugging.py`

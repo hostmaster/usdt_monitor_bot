@@ -11,7 +11,6 @@ The Spam Detection feature provides comprehensive protection against address poi
 ## Quick Links
 
 - **[User Guide](./spam_detection_guide.md)** - Practical guide for understanding and using spam detection
-- **[Research Summary](../../research/RESEARCH_SUMMARY.md)** - Research basis for detection thresholds
 
 ## Key Features
 
@@ -124,8 +123,3 @@ Potential improvements for future versions:
 - User-specific threshold customization
 - Admin commands for risk management
 - Analytics and reporting dashboard
-
----
-
-**For research and design decisions, see the [Research Summary](../../research/RESEARCH_SUMMARY.md) document.**
-
