@@ -10,16 +10,17 @@ Comprehensive documentation for all bot features, including implementation detai
 - **[Features Index](./features/README.md)** - Overview of all available features
 - **[Spam Detection](./features/spam-detection/)** - Advanced transaction filtering and risk analysis
 
-### [Research](./research/)
-Research summaries and design decisions.
-
-- **[Research Summary](./research/RESEARCH_SUMMARY.md)** - Research findings and design decisions
-
 ### [Guides](./guides/)
 User guides and deployment instructions.
 
 - **[Quick Start Guide](./guides/QUICK_START.md)** - Get started quickly
 - **[Deployment Guide](./guides/DEPLOY.md)** - Docker deployment instructions
+
+### [Debug & Instrumentation](./debug/)
+Spam detector debugging and instrumentation.
+
+- **[Debug Quick Reference](./debug/DEBUG_QUICK_REFERENCE.md)** - Commands and log analysis
+- **[Spam Detector Debugging](./SPAM_DETECTOR_DEBUGGING.md)** - Full step-by-step guide
 
 ### [Examples](./examples/)
 Code examples and real-world usage scenarios.
@@ -33,9 +34,9 @@ Code examples and real-world usage scenarios.
 
 - **[Main README](../README.md)** - Project overview and getting started
 - **[Features Documentation](./features/)** - Feature-specific documentation
-- **[Research](./research/)** - Technical research and design decisions
+- **[Debug](./debug/)** - Spam detector debugging and quick reference
 
 ---
 
-**Last Updated:** 2026-01-04
+**Last Updated:** 2026-02-18
 
