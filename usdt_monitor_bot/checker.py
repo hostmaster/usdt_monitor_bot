@@ -9,6 +9,7 @@ and performs spam detection analysis.
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -66,6 +67,10 @@ class TransactionChecker:
         self._spam_detection_enabled = True  # Enable by default
         # Cache for contract creation blocks to avoid repeated API calls
         self._contract_creation_cache: dict[str, Optional[int]] = {}
+        # Bounded in-memory cache of (user_id, tx_hash) to suppress duplicate notifications
+        self._notification_sent_cache: set[tuple[int, str]] = set()
+        self._notification_sent_order: deque[tuple[int, str]] = deque()
+        self._notification_dedup_max_size = config.notification_dedup_cache_size
         logging.debug("TransactionChecker initialized")
 
     def _handle_etherscan_error(
@@ -466,6 +471,20 @@ class TransactionChecker:
                 exc_info=True,
             )
 
+    def _add_notification_sent(self, user_id: int, tx_hash: str) -> None:
+        """Record (user_id, tx_hash) in the bounded dedup cache and evict oldest if over cap."""
+        key = (user_id, tx_hash)
+        if key in self._notification_sent_cache:
+            return
+        while (
+            len(self._notification_sent_order) >= self._notification_dedup_max_size
+            and self._notification_sent_order
+        ):
+            old = self._notification_sent_order.popleft()
+            self._notification_sent_cache.discard(old)
+        self._notification_sent_cache.add(key)
+        self._notification_sent_order.append(key)
+
     async def _process_single_transaction(
         self,
         tx: dict,
@@ -539,13 +558,18 @@ class TransactionChecker:
             logging.debug(f"Suppressing notification for spam tx={tx_hash[:16]}...")
             return 0
 
-        # Send notifications for legitimate transactions only
+        # Send notifications for legitimate transactions only (skip if already sent recently)
+        sent_count = 0
         for user_id in user_ids:
+            if (user_id, tx_hash) in self._notification_sent_cache:
+                logging.debug(f"Skip duplicate notify user={user_id} tx={tx_hash[:16]}...")
+                continue
             await self._notifier.send_token_notification(
                 user_id, tx, tx_token_symbol, address_lower, risk_analysis
             )
-
-        return len(user_ids)
+            self._add_notification_sent(user_id, tx_hash)
+            sent_count += 1
+        return sent_count
 
     async def _send_notifications_for_batch(
         self, user_ids: List[int], batch: List[dict], address_lower: str
@@ -619,6 +643,16 @@ class TransactionChecker:
         )
 
         processing_batch = self._filter_transactions(all_transactions, start_block)
+        # Dedupe by tx_hash: API can return duplicate events (same tx in multiple token responses,
+        # or multiple transfer events for the same token in one tx). Notify at most once per user per tx per cycle.
+        seen_hashes: set[str] = set()
+        unique_batch: List[dict] = []
+        for tx in processing_batch:
+            h = tx.get("hash")
+            if h and h not in seen_hashes:
+                seen_hashes.add(h)
+                unique_batch.append(tx)
+        processing_batch = unique_batch
 
         if not processing_batch:
             logging.debug(f"No tx after filtering for {address_lower[:8]}...")
