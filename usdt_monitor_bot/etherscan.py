@@ -330,6 +330,10 @@ class EtherscanClient:
         """
         Get token transactions for an address from a specific block number.
 
+        The API may return duplicate transaction hashes: the same tx can appear
+        in multiple token responses, or multiple transfer events for one token in
+        a single tx. Callers should dedupe by hash if they need one record per tx.
+
         Args:
             contract_address: The token contract address
             address: The address to check transactions for

@@ -59,15 +59,21 @@ def mock_config():
     config.etherscan_request_delay = 0
     config.max_transaction_age_days = 7
     config.max_transactions_per_check = 10
+    config.notification_dedup_cache_size = 10_000
 
     token_registry = MagicMock()
     usdt_token = MagicMock(contract_address=USDT_CONTRACT, symbol="USDT")
     usdc_token = MagicMock(contract_address=USDC_CONTRACT, symbol="USDC")
 
+    usdt_token.decimals = 6
+    usdc_token.decimals = 6
     token_registry.get_all_tokens.return_value = {
         "USDT": usdt_token,
         "USDC": usdc_token,
     }
+    token_registry.get_token.side_effect = lambda s: (
+        usdt_token if s == "USDT" else (usdc_token if s == "USDC" else None)
+    )
     token_map = {
         USDT_CONTRACT: usdt_token,
         USDC_CONTRACT: usdc_token,
@@ -187,6 +193,7 @@ async def test_check_single_address_with_tx(
     mock_notifier: AsyncMock,
 ):
     """Test processing new transactions (incoming, outgoing, mixed) for a single address."""
+    checker._spam_detection_enabled = False
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     mock_db.get_users_for_address.return_value = [USER1]
@@ -216,6 +223,7 @@ async def test_check_multiple_addresses(
     mock_notifier: AsyncMock,
 ):
     """Test that multiple addresses with different tokens are processed correctly."""
+    checker._spam_detection_enabled = False
     tx1 = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
     tx2 = create_mock_tx(BLOCK_ADDR1_START + 10, "0xsender", ADDR2, USDC_CONTRACT)
 
@@ -277,6 +285,7 @@ async def test_transaction_age_filtering(
     mock_notifier: AsyncMock,
 ):
     """Test that transactions older than `max_transaction_age_days` are ignored."""
+    checker._spam_detection_enabled = False
     recent_ts = int(NOW_TS - timedelta(days=1).total_seconds())
     old_ts = int(NOW_TS - timedelta(days=8).total_seconds())
 
@@ -314,6 +323,7 @@ async def test_transaction_count_limiting(
     mock_config: MagicMock,
 ):
     """Test that only `max_transactions_per_check` are processed."""
+    checker._spam_detection_enabled = False
     # Create more transactions than the limit
     tx_count = mock_config.max_transactions_per_check + 5
     transactions = [
@@ -350,6 +360,7 @@ async def test_invalid_timestamp_is_skipped(
     mock_notifier: AsyncMock,
 ):
     """Test that a transaction with an invalid timestamp is skipped."""
+    checker._spam_detection_enabled = False
     valid_tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
     invalid_tx = create_mock_tx(BLOCK_ADDR1_START + 2, "0xsender", ADDR1, USDT_CONTRACT)
     invalid_tx["timeStamp"] = "not-a-timestamp"
@@ -826,6 +837,100 @@ async def test_process_transaction_missing_hash_or_symbol(
             tx_no_symbol, [USER1], ADDR1.lower(), []
         )
         assert result == 0
+
+
+# --- Tests for Notification Deduplication ---
+
+
+async def test_in_batch_dedup_same_tx_hash_one_notification_per_user(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """Same tx_hash appearing twice in batch (e.g. USDT + USDC) yields one notification per user."""
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+
+    same_hash = "0xabcd1234"
+    tx_usdt = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash=same_hash
+    )
+    tx_usdt["token_symbol"] = "USDT"
+    tx_usdc = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDC_CONTRACT, tx_hash=same_hash
+    )
+    tx_usdc["token_symbol"] = "USDC"
+    batch_same_tx_twice = [tx_usdt, tx_usdc]
+
+    await checker._process_address_transactions(
+        ADDR1.lower(),
+        batch_same_tx_twice,
+        BLOCK_ADDR1_START,
+        latest_block=BLOCK_ADDR1_START + 100,
+    )
+
+    # Deduped to one tx, so one notification per user
+    mock_notifier.send_token_notification.assert_awaited_once()
+    call_args = mock_notifier.send_token_notification.call_args[0]
+    assert call_args[0] == USER1
+    assert call_args[1].get("hash") == same_hash
+
+
+async def test_notification_cache_skips_duplicate_send(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """Same (user_id, tx_hash) sent again in same checker instance is skipped (cache hit)."""
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xunique99"
+    )
+    tx["token_symbol"] = "USDT"
+
+    result1 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    assert result1 == 1
+    mock_notifier.send_token_notification.assert_awaited_once()
+
+    result2 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    assert result2 == 0
+    # Still only one call total (second send skipped by cache)
+    mock_notifier.send_token_notification.assert_awaited_once()
+
+
+async def test_notification_cache_disabled_when_size_zero(
+    mock_config: MagicMock,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """When notification_dedup_cache_size is 0, cache is disabled; duplicate sends are not suppressed."""
+    mock_config.notification_dedup_cache_size = 0
+    checker = TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xdup"
+    )
+    tx["token_symbol"] = "USDT"
+
+    result1 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    result2 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    assert result1 == 1
+    assert result2 == 1
+    assert mock_notifier.send_token_notification.await_count == 2
 
 
 # --- Tests for Contract Age Caching ---

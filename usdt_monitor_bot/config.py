@@ -53,6 +53,7 @@ class BotConfig:
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
         verbose_logging: bool = False,  # Enable DEBUG level logging
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
+        notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -89,6 +90,9 @@ class BotConfig:
         # Logging settings
         self.verbose_logging = verbose_logging
         self.spam_detection_debug = spam_detection_debug
+
+        # Notification deduplication (in-memory cache cap)
+        self.notification_dedup_cache_size = notification_dedup_cache_size
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -204,6 +208,11 @@ def load_config() -> BotConfig:
     verbose_env = os.getenv("VERBOSE", "").lower()
     verbose_logging = verbose_env in ("true", "1", "yes", "on")
 
+    # Notification deduplication cache size (in-memory)
+    notification_dedup_cache_size = _get_env_int(
+        "NOTIFICATION_DEDUP_CACHE_SIZE", 10_000
+    )
+
     # Spam detection debugging option
     spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
     spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
@@ -238,6 +247,7 @@ def load_config() -> BotConfig:
         max_transactions_per_check=max_transactions_per_check,
         verbose_logging=verbose_logging,
         spam_detection_debug=spam_detection_debug,
+        notification_dedup_cache_size=notification_dedup_cache_size,
     )
 
     # Token configuration overrides
