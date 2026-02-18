@@ -379,7 +379,7 @@ class TransactionChecker:
         amount = f"{tx_metadata.value:.2f}"
 
         # Whitelist status
-        is_whitelisted = risk_analysis.details.get("whitelisted", False) if risk_analysis.details else False
+        is_whitelisted = (risk_analysis.details or {}).get("whitelisted", False)
         whitelist_status = "WL" if is_whitelisted else ""
 
         # Spam status
