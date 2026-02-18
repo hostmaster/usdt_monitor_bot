@@ -62,9 +62,9 @@ class TestAddressValidation:
 
     def test_invalid_non_string_input(self):
         """Non-string inputs should fail gracefully."""
-        assert not is_valid_ethereum_address(12345)
-        assert not is_valid_ethereum_address(["0x1234567890123456789012345678901234567890"])
-        assert not is_valid_ethereum_address({"address": "0x123"})
+        assert not is_valid_ethereum_address(12345)  # type: ignore[arg-type]
+        assert not is_valid_ethereum_address(["0x1234567890123456789012345678901234567890"])  # type: ignore[arg-type]
+        assert not is_valid_ethereum_address({"address": "0x123"})  # type: ignore[arg-type]
 
     def test_valid_checksum_address(self):
         """EIP-55 checksum addresses should pass (we don't validate checksum, just format)."""

@@ -391,6 +391,7 @@ async def test_database_migration_existing_db(memory_db_manager: DatabaseManager
 
     # Verify existing data is still intact
     wallets = await memory_db_manager.list_wallets(5)
+    assert wallets is not None
     assert monitored_addr.lower() in wallets
 
     # Verify we can use the new table

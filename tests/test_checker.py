@@ -1,6 +1,7 @@
 # tests/test_checker.py
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -35,7 +36,7 @@ def create_mock_tx(
     to_addr: str,
     contract_address: str,
     timestamp: int = NOW_TS,
-    tx_hash: str = None,
+    tx_hash: Optional[str] = None,
 ) -> dict:
     """Creates a mock transaction dictionary."""
     if tx_hash is None:
@@ -268,7 +269,7 @@ async def test_check_etherscan_rate_limit_skips_block_update(
     mock_db.get_distinct_addresses.return_value = [ADDR1]
     mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
     # Simulate rate limit error for all token fetches for the address
-    checker._fetch_transactions_for_address = AsyncMock(
+    checker._fetch_transactions_for_address = AsyncMock(  # type: ignore[assignment]
         side_effect=EtherscanRateLimitError("Rate Limited")
     )
 
