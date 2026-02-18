@@ -473,6 +473,8 @@ class TransactionChecker:
 
     def _add_notification_sent(self, user_id: int, tx_hash: str) -> None:
         """Record (user_id, tx_hash) in the bounded dedup cache and evict oldest if over cap."""
+        if self._notification_dedup_max_size <= 0:
+            return  # Cache disabled when size is not positive
         key = (user_id, tx_hash)
         if key in self._notification_sent_cache:
             return
@@ -558,10 +560,10 @@ class TransactionChecker:
             logging.debug(f"Suppressing notification for spam tx={tx_hash[:16]}...")
             return 0
 
-        # Send notifications for legitimate transactions only (skip if already sent recently)
+        # Send notifications for legitimate transactions only (skip if already sent recently when cache enabled)
         sent_count = 0
         for user_id in user_ids:
-            if (user_id, tx_hash) in self._notification_sent_cache:
+            if self._notification_dedup_max_size > 0 and (user_id, tx_hash) in self._notification_sent_cache:
                 logging.debug(f"Skip duplicate notify user={user_id} tx={tx_hash[:16]}...")
                 continue
             await self._notifier.send_token_notification(

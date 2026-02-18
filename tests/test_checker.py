@@ -905,6 +905,34 @@ async def test_notification_cache_skips_duplicate_send(
     mock_notifier.send_token_notification.assert_awaited_once()
 
 
+async def test_notification_cache_disabled_when_size_zero(
+    mock_config: MagicMock,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """When notification_dedup_cache_size is 0, cache is disabled; duplicate sends are not suppressed."""
+    mock_config.notification_dedup_cache_size = 0
+    checker = TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xdup"
+    )
+    tx["token_symbol"] = "USDT"
+
+    result1 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    result2 = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    assert result1 == 1
+    assert result2 == 1
+    assert mock_notifier.send_token_notification.await_count == 2
+
+
 # --- Tests for Contract Age Caching ---
 
 
