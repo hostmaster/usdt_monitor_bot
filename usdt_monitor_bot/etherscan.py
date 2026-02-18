@@ -360,7 +360,8 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
         session = self._session
-        assert session is not None
+        if session is None:
+            raise RuntimeError("HTTP session not initialized")
 
         async def _make_request():
             """Inner function to make the actual request."""
@@ -444,7 +445,8 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
         session = self._session
-        assert session is not None
+        if session is None:
+            raise RuntimeError("HTTP session not initialized")
 
         async def _make_request():
             """Inner function to make the actual request."""
@@ -513,7 +515,8 @@ class EtherscanClient:
             "apikey": self._api_key,
         }
         session = self._session
-        assert session is not None
+        if session is None:
+            raise RuntimeError("HTTP session not initialized")
 
         async def _make_request():
             """Inner function to make the actual request."""
