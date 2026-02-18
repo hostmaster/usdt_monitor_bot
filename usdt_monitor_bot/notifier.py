@@ -40,7 +40,7 @@ class NotificationService:
         is_incoming: bool,
         timestamp: int,
         risk_analysis: Optional[RiskAnalysis] = None,
-    ) -> str:
+    ) -> Optional[str]:
         """Format a token transaction notification message.
 
         Args:
@@ -52,7 +52,7 @@ class NotificationService:
             timestamp: Unix timestamp of the transaction
 
         Returns:
-            str: Formatted HTML message for Telegram notification, or None if formatting fails
+            Formatted HTML message for Telegram notification, or None if formatting fails
         """
         try:
             # Quick validation of required fields
@@ -205,7 +205,7 @@ class NotificationService:
                 is_incoming = monitored_address_lower == tx_to_lower
 
             # Select the address to show based on transaction direction
-            address_to_show = tx_data.get("from") if is_incoming else tx_data.get("to")
+            address_to_show = tx_data.get("from", "") if is_incoming else tx_data.get("to", "")
 
             # Format the message using token-specific configuration
             message = self._format_token_message(
@@ -237,7 +237,7 @@ class NotificationService:
             logging.error(f"Notify error user={user_id}: {e}", exc_info=True)
 
 
-def format_token_amount(value: float, decimals: int = 6) -> str:
+def format_token_amount(value: float, decimals: int = 6) -> Optional[str]:
     """Format token amount with 2 decimal places, considering token decimals."""
     try:
         actual_value = float(value) / (10**decimals)
@@ -246,14 +246,14 @@ def format_token_amount(value: float, decimals: int = 6) -> str:
         return None
 
 
-def format_address(address: str) -> str:
+def format_address(address: str) -> Optional[str]:
     """Format address for display."""
     if not address:
         return None
     return address  # Show full address
 
 
-def format_timestamp(timestamp: int) -> str:
+def format_timestamp(timestamp: int) -> Optional[str]:
     """Format timestamp as human-readable date."""
     try:
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")

@@ -351,7 +351,7 @@ class RiskAnalysis:
     is_suspicious: bool
     similarity_score: int = 0
     recommendation: str = ""
-    details: Dict = None
+    details: Optional[Dict] = None
 
     def __post_init__(self):
         if self.details is None:
@@ -545,7 +545,7 @@ class SpamDetector:
             tx.to_address,
             tx_from_normalized in whitelist_normalized,
             tx_to_normalized in whitelist_normalized,
-            monitored_normalized and tx_from_normalized == monitored_normalized,
+            bool(monitored_normalized and tx_from_normalized == monitored_normalized),
         )
         
         if tx_from_normalized in whitelist_normalized:
@@ -815,14 +815,14 @@ class SpamDetector:
         is_suspicious = score >= self.config["suspicious_score_threshold"]
 
         # Generate recommendation
-        recommendation = self._generate_recommendation(flags, score, tx)
+        recommendation = self._generate_recommendation(list(flags), score, tx)
 
         # Log analysis decision
         SpamDebuggingLogger.log_analysis_decision(
             tx.tx_hash,
             score,
             is_suspicious,
-            flags,
+            list(flags),
             self.config["suspicious_score_threshold"],
         )
 
@@ -845,7 +845,7 @@ class SpamDetector:
                 tx.value,
                 score,
                 self.config["suspicious_score_threshold"],
-                flags,
+                list(flags),
                 reason,
             )
 

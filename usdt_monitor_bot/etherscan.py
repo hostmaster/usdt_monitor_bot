@@ -359,10 +359,12 @@ class EtherscanClient:
             "sort": "asc",
             "apikey": self._api_key,
         }
+        session = self._session
+        assert session is not None
 
         async def _make_request():
             """Inner function to make the actual request."""
-            async with self._session.get(self._base_url, params=params) as response:
+            async with session.get(self._base_url, params=params) as response:
                 if response.status == 429:  # Too Many Requests
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
@@ -441,10 +443,12 @@ class EtherscanClient:
             "contractaddresses": contract_address,
             "apikey": self._api_key,
         }
+        session = self._session
+        assert session is not None
 
         async def _make_request():
             """Inner function to make the actual request."""
-            async with self._session.get(self._base_url, params=params) as response:
+            async with session.get(self._base_url, params=params) as response:
                 if response.status == 429:
                     raise EtherscanRateLimitError("Rate limit exceeded")
 
@@ -508,10 +512,12 @@ class EtherscanClient:
             "action": "eth_blockNumber",
             "apikey": self._api_key,
         }
+        session = self._session
+        assert session is not None
 
         async def _make_request():
             """Inner function to make the actual request."""
-            async with self._session.get(self._base_url, params=params) as response:
+            async with session.get(self._base_url, params=params) as response:
                 if response.status == 429:
                     raise EtherscanRateLimitError("Rate limit exceeded")
 

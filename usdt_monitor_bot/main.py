@@ -149,8 +149,9 @@ async def main() -> None:
 
         # Check if polling task raised an exception
         for task in done:
-            if task.exception() is not None:
-                raise task.exception()
+            exc = task.exception()
+            if exc is not None:
+                raise exc
 
     finally:
         logging.info("Shutting down...")

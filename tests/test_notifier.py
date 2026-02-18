@@ -106,7 +106,7 @@ async def test_send_token_notification_usdc(
     """Test sending a notification for a USDC transaction."""
     monitored_address = TX2_INCOMING_USDC["to"]  # Monitored address is the recipient
     # Update mock to return USDC config
-    notifier._config.token_registry.get_token.return_value = TokenConfig(
+    notifier._config.token_registry.get_token.return_value = TokenConfig(  # type: ignore[assignment]
         name="USD Coin",
         contract_address="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         decimals=6,
@@ -131,7 +131,7 @@ async def test_send_token_notification_unknown_token(
 ):
     """Test handling of unknown token type."""
     # Configure mock to return None for unknown token
-    notifier._config.token_registry.get_token.return_value = None
+    notifier._config.token_registry.get_token.return_value = None  # type: ignore[assignment]
     monitored_address = TX1_INCOMING_USDT["to"]
 
     # Should not raise an exception
@@ -143,8 +143,8 @@ async def test_send_token_notification_unknown_token(
     mock_telegram_bot.send_message.assert_not_called()
 
     # Verify that error was logged
-    assert notifier._config.token_registry.get_token.called
-    notifier._config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")
+    assert notifier._config.token_registry.get_token.called  # type: ignore[union-attr]
+    notifier._config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
@@ -390,7 +390,7 @@ async def test_send_token_notification_none_tx(
     """Test that None transaction is handled gracefully."""
     with caplog.at_level(logging.WARNING):
         await notifier.send_token_notification(
-            USER1, None, "USDT", ADDR1
+            USER1, None, "USDT", ADDR1  # type: ignore[arg-type]
         )
 
     mock_telegram_bot.send_message.assert_not_called()
@@ -423,7 +423,7 @@ async def test_send_token_notification_telegram_api_error(
 ):
     """Test handling of Telegram API errors during message sending."""
     mock_telegram_bot.send_message.side_effect = TelegramAPIError(
-        method="sendMessage", message="Chat not found"
+        method=MagicMock(), message="Chat not found"
     )
 
     with caplog.at_level(logging.ERROR):
@@ -438,10 +438,10 @@ async def test_send_token_notification_telegram_api_error(
 async def test_format_token_message_missing_tx_hash(notifier: NotificationService):
     """Test that missing tx_hash returns None."""
     result = notifier._format_token_message(
-        tx_hash=None,
+        tx_hash=None,  # type: ignore[arg-type]
         address="0xsender",
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=1620000000,
     )
@@ -457,7 +457,7 @@ async def test_format_token_message_invalid_tx_hash_format(
         tx_hash="abc123",  # No 0x prefix
         address="0xsender",
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=1620000000,
     )
@@ -473,7 +473,7 @@ async def test_format_token_message_invalid_address_format(
         tx_hash="0x123",
         address="sender123",  # No 0x prefix
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=1620000000,
     )
@@ -487,7 +487,7 @@ async def test_format_token_message_negative_value(notifier: NotificationService
         tx_hash="0x123",
         address="0xsender",
         value=-100.0,  # Negative value
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=1620000000,
     )
@@ -504,7 +504,7 @@ async def test_format_token_message_future_timestamp(notifier: NotificationServi
         tx_hash="0x123",
         address="0xsender",
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=future_ts,
     )
@@ -518,7 +518,7 @@ async def test_format_token_message_negative_timestamp(notifier: NotificationSer
         tx_hash="0x123",
         address="0xsender",
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
         timestamp=-1,
     )
@@ -534,9 +534,9 @@ async def test_format_token_message_non_integer_timestamp(
         tx_hash="0x123",
         address="0xsender",
         value=1.0,
-        token_config=notifier._config.token_registry.get_token("USDT"),
+        token_config=notifier._config.token_registry.get_token("USDT"),  # type: ignore[arg-type]
         is_incoming=True,
-        timestamp="not-a-timestamp",
+        timestamp="not-a-timestamp",  # type: ignore[arg-type]
     )
     assert result is None
 
