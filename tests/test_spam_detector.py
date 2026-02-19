@@ -804,7 +804,7 @@ class TestEdgeCases:
 
     def test_recommendation_levels(self, detector, base_timestamp):
         """Recommendations should vary by risk score."""
-        # High risk transaction (value above spam threshold to test scoring filters)
+        # High risk transaction (value below dust threshold to test scoring filters)
         high_risk_tx = TransactionMetadata(
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
