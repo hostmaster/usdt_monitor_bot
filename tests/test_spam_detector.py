@@ -173,12 +173,12 @@ class TestTransactionAnalysis:
     """Tests for analyze_transaction method."""
 
     def test_dust_amount_detection(self, detector, base_timestamp):
-        """Small amounts (< $1) should be flagged as dust."""
+        """Small amounts (< $0.10) should be flagged as dust."""
         tx = TransactionMetadata(
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0.50"),  # Dust amount
+            value=Decimal("0.05"),  # Dust amount
             block_number=1000,
             timestamp=base_timestamp,
         )
@@ -260,8 +260,6 @@ class TestTransactionAnalysis:
         analysis = detector.analyze_transaction(tx2, [tx1])
 
         # Should detect similarity if addresses are actually similar
-        # Note: This test depends on the actual similarity of the addresses
-        # If addresses aren't similar enough, this test will fail
         similarity = detector.calculate_address_similarity(
             legitimate_address, similar_address
         )
@@ -468,17 +466,16 @@ class TestTransactionAnalysis:
 
         assert isinstance(analysis, RiskAnalysis)
         assert analysis.score >= 0
-        # Should still detect dust amount
         assert RiskFlag.DUST_AMOUNT in analysis.flags
 
     def test_score_capped_at_100(self, detector, base_timestamp):
         """Risk score should be capped at 100."""
-        # Create transaction with many risk factors
+        # Create transaction with many risk factors (value above spam threshold)
         tx = TransactionMetadata(
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0"),  # Zero value
+            value=Decimal("0.01"),
             block_number=1000,
             timestamp=base_timestamp,
             is_new_address=True,
@@ -497,7 +494,7 @@ class TestTransactionAnalysis:
             to_address="0x2222222222222222222222222222222222222222",
             value=Decimal(
                 "0.75"
-            ),  # Above default threshold ($1) but below custom ($0.5)
+            ),  # Above custom threshold ($0.5)
             block_number=1000,
             timestamp=base_timestamp,
             contract_age_blocks=100,  # Not brand new
@@ -522,6 +519,42 @@ class TestTransactionAnalysis:
 
         analysis2 = custom_detector.analyze_transaction(tx2, [])
         assert RiskFlag.DUST_AMOUNT in analysis2.flags
+
+    def test_dust_below_threshold_is_suspicious(self, detector, base_timestamp):
+        """Transactions below $0.10 should be suspicious from dust weight alone."""
+        for value in ["0.001", "0.05", "0.09", "0.099"]:
+            tx = TransactionMetadata(
+                tx_hash=f"0x{value}",
+                from_address="0x1111111111111111111111111111111111111111",
+                to_address="0x2222222222222222222222222222222222222222",
+                value=Decimal(value),
+                block_number=1000,
+                timestamp=base_timestamp,
+                contract_age_blocks=100,
+            )
+
+            analysis = detector.analyze_transaction(tx, [])
+
+            assert RiskFlag.DUST_AMOUNT in analysis.flags, f"value={value}"
+            assert analysis.is_suspicious is True, f"value={value} should be spam"
+            assert analysis.score >= detector.config["suspicious_score_threshold"]
+
+    def test_value_at_dust_threshold_not_flagged(self, detector, base_timestamp):
+        """Transactions at or above dust threshold should NOT be flagged as dust."""
+        for value in ["0.10", "0.50", "1.00", "100"]:
+            tx = TransactionMetadata(
+                tx_hash=f"0x{value}",
+                from_address="0x1111111111111111111111111111111111111111",
+                to_address="0x2222222222222222222222222222222222222222",
+                value=Decimal(value),
+                block_number=1000,
+                timestamp=base_timestamp,
+                contract_age_blocks=100,
+            )
+
+            analysis = detector.analyze_transaction(tx, [])
+
+            assert RiskFlag.DUST_AMOUNT not in analysis.flags, f"value={value}"
 
     def test_timing_window_outside_range(self, detector, base_timestamp):
         """Transactions outside timing window should not trigger timing flag."""
@@ -592,7 +625,8 @@ class TestConfiguration:
         """Default configuration should have expected values."""
         config = detector.config
 
-        assert config["dust_threshold_usd"] == 1.0
+        assert config["dust_threshold_usd"] == 0.1
+        assert config["dust_risk_weight"] == 50
         assert config["suspicious_score_threshold"] == 50
         assert config["similarity_weight"] == 40
         assert config["suspicious_time_window"] == 1200  # 20 minutes
@@ -647,7 +681,7 @@ class TestUtilityFunctions:
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0"),  # Zero value for high score
+            value=Decimal("0.01"),
             block_number=1000,
             timestamp=base_timestamp,
             is_new_address=True,
@@ -667,7 +701,7 @@ class TestUtilityFunctions:
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0.50"),  # Dust amount
+            value=Decimal("0.05"),  # Dust amount
             block_number=1000,
             timestamp=base_timestamp,
             contract_age_blocks=5,  # Brand new
@@ -759,7 +793,7 @@ class TestEdgeCases:
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal(str(detector.config["dust_threshold_usd"])),  # Exactly $1
+            value=Decimal(str(detector.config["dust_threshold_usd"])),  # Exactly at threshold
             block_number=1000,
             timestamp=base_timestamp,
         )
@@ -770,12 +804,12 @@ class TestEdgeCases:
 
     def test_recommendation_levels(self, detector, base_timestamp):
         """Recommendations should vary by risk score."""
-        # High risk transaction
+        # High risk transaction (value above spam threshold to test scoring filters)
         high_risk_tx = TransactionMetadata(
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
             to_address="0x2222222222222222222222222222222222222222",
-            value=Decimal("0"),  # Zero value
+            value=Decimal("0.01"),
             block_number=1000,
             timestamp=base_timestamp,
             is_new_address=True,

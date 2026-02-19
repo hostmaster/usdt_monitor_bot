@@ -5,7 +5,7 @@ Detects address poisoning, dust attacks, and spam transactions
 Research-based detection thresholds:
 - Address similarity: prefix >= 3 AND suffix >= 4
 - Timing window: 20 minutes (1200 seconds)
-- Dust threshold: < $1 USDT
+- Dust threshold: < $0.10 USDT/USDC
 - Risk score threshold: >= 50/100
 """
 
@@ -382,8 +382,8 @@ class SpamDetector:
     def _default_config() -> Dict:
         """Default configuration values based on research"""
         return {
-            # Value thresholds (in USDT)
-            "dust_threshold_usd": 1.0,
+            # Value thresholds (in USDT/USDC)
+            "dust_threshold_usd": 0.1,
             "zero_value_flag": True,
             # Address similarity
             "prefix_match_threshold": 3,  # Matching first N chars
@@ -392,7 +392,7 @@ class SpamDetector:
             "suspicious_time_window": 1200,  # 20 minutes
             "min_blocks_for_address_age": 20,
             # Risk scoring weights
-            "dust_risk_weight": 30,
+            "dust_risk_weight": 50,
             "zero_value_weight": 50,
             "timing_weight": 25,
             "similarity_weight": 40,
