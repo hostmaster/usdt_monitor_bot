@@ -78,16 +78,17 @@ def test_debug_logging_bypass_case(caplog):
     detector = SpamDetector(config={"dust_risk_weight": 5, "new_address_weight": 8})
     now = datetime.now(timezone.utc)
     
-    # Transaction with multiple risk flags but low score
+    # Transaction with multiple risk flags but value above dust threshold
+    # so it requires other signals to approach the suspicious threshold
     tx = TransactionMetadata(
         tx_hash="0xbypasscase9999",
         from_address="0x3333333333333333333333333333333333333333",
         to_address="0x4444444444444444444444444444444444444444",
-        value=Decimal("0.01"),  # Dust
+        value=Decimal("10.00"),
         block_number=1000,
         timestamp=now,
-        is_new_address=True,  # New sender
-        contract_age_blocks=5,  # Brand new contract
+        is_new_address=True,  # New sender (+8)
+        contract_age_blocks=5,  # Brand new contract (+35)
     )
     
     with caplog.at_level(logging.DEBUG):
