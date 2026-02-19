@@ -470,7 +470,7 @@ class TestTransactionAnalysis:
 
     def test_score_capped_at_100(self, detector, base_timestamp):
         """Risk score should be capped at 100."""
-        # Create transaction with many risk factors (value above spam threshold)
+        # Create transaction with many risk factors (value below dust threshold)
         tx = TransactionMetadata(
             tx_hash="0x123",
             from_address="0x1111111111111111111111111111111111111111",
