@@ -87,7 +87,7 @@ def test_debug_logging_bypass_case(caplog):
         value=Decimal("10.00"),
         block_number=1000,
         timestamp=now,
-        is_new_address=True,  # New sender (+15)
+        is_new_address=True,  # New sender (+8)
         contract_age_blocks=5,  # Brand new contract (+35)
     )
     
