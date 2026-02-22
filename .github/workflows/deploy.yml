@@ -1,0 +1,47 @@
+---
+name: Deploy via Tailscale
+
+on:
+  workflow_run:
+    workflows: ["Docker Image Build"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    if: |
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Join Tailscale Network
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          hostname: ci-deployer-${{ github.run_id }}
+          tailscaled-args: --state=mem:
+          args: --ssh
+          timeout: 60s
+          ping: ${{ secrets.TAILSCALE_SERVER_IP }}
+
+      - name: Deploy Service via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.TAILSCALE_SERVER_IP }}
+          username: ${{ secrets.TAILSCALE_SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/usdt_monitor_bot
+            echo "🔄 Pulling and restarting service..."
+            docker compose -f docker-compose.prod.yml up --pull always --detach telegram-bot
+            echo "✅ Deploy complete"
+            docker compose -f docker-compose.prod.yml logs --tail=10 telegram-bot
