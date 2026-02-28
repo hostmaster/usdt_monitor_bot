@@ -54,6 +54,7 @@ class BotConfig:
         verbose_logging: bool = False,  # Enable DEBUG level logging
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
         notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
+        spam_detector_config: Optional[dict] = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -93,6 +94,9 @@ class BotConfig:
 
         # Notification deduplication (in-memory cache cap)
         self.notification_dedup_cache_size = notification_dedup_cache_size
+
+        # Spam detector threshold overrides (None = use SpamDetector defaults)
+        self.spam_detector_config: Optional[dict] = spam_detector_config if spam_detector_config else None
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -217,6 +221,36 @@ def load_config() -> BotConfig:
     spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
     spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
 
+    # Spam detector threshold overrides — only include keys whose env var is set
+    _spam_float_keys = [
+        ("SPAM_DUST_THRESHOLD_USD", "dust_threshold_usd"),
+        ("SPAM_TIMING_WEIGHT", "timing_weight"),
+        ("SPAM_SIMILARITY_WEIGHT", "similarity_weight"),
+        ("SPAM_NEW_ADDRESS_WEIGHT", "new_address_weight"),
+        ("SPAM_BRAND_NEW_CONTRACT_WEIGHT", "brand_new_contract_weight"),
+        ("SPAM_DUST_RISK_WEIGHT", "dust_risk_weight"),
+        ("SPAM_ZERO_VALUE_WEIGHT", "zero_value_weight"),
+        ("SPAM_RAPID_CYCLING_WEIGHT", "rapid_cycling_weight"),
+        ("SPAM_RAPID_CYCLING_WINDOW", "rapid_cycling_window"),
+        ("SPAM_TIMING_WINDOW", "suspicious_time_window"),
+    ]
+    _spam_int_keys = [
+        ("SPAM_PREFIX_MATCH_THRESHOLD", "prefix_match_threshold"),
+        ("SPAM_SUFFIX_MATCH_THRESHOLD", "suffix_match_threshold"),
+        ("SPAM_MIN_BLOCKS_FOR_ADDRESS_AGE", "min_blocks_for_address_age"),
+        ("SPAM_SCORE_THRESHOLD", "suspicious_score_threshold"),
+        ("SPAM_RAPID_CYCLING_THRESHOLD", "rapid_cycling_threshold"),
+    ]
+    spam_detector_config: dict = {}
+    for env_var, key in _spam_float_keys:
+        if os.getenv(env_var):
+            spam_detector_config[key] = _get_env_float(env_var, 0.0)
+    for env_var, key in _spam_int_keys:
+        if os.getenv(env_var):
+            spam_detector_config[key] = _get_env_int(env_var, 0)
+    if spam_detector_config:
+        logging.debug(f"Spam detector overrides: {spam_detector_config}")
+
     # Log all config details at DEBUG level
     logging.debug(
         f"Config: db={db_path}, api_url={etherscan_base_url}, "
@@ -248,6 +282,7 @@ def load_config() -> BotConfig:
         verbose_logging=verbose_logging,
         spam_detection_debug=spam_detection_debug,
         notification_dedup_cache_size=notification_dedup_cache_size,
+        spam_detector_config=spam_detector_config if spam_detector_config else None,
     )
 
     # Token configuration overrides

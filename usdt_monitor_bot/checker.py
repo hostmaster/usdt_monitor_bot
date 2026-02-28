@@ -10,15 +10,13 @@ import asyncio
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 # Third-party
 import aiohttp
 
 # Local
+from usdt_monitor_bot.block_tracker import BlockDeterminationResult, BlockTracker
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
@@ -32,17 +30,12 @@ from usdt_monitor_bot.spam_detector import (
     SpamDetector,
     TransactionMetadata,
 )
-
-
-@dataclass
-class BlockDeterminationResult:
-    """Result of determining the next block number to check."""
-
-    final_block_number: int
-    """The final block number to use for the next check."""
-
-    resetting_to_latest: bool
-    """Whether the block was reset/capped to sync with the blockchain."""
+from usdt_monitor_bot.transaction_parser import (
+    convert_db_transaction_to_metadata,
+    convert_to_transaction_metadata,
+    filter_transactions,
+    format_transaction_log,
+)
 
 
 class TransactionChecker:
@@ -71,6 +64,7 @@ class TransactionChecker:
         self._notification_sent_cache: set[tuple[int, str]] = set()
         self._notification_sent_order: deque[tuple[int, str]] = deque()
         self._notification_dedup_max_size = config.notification_dedup_cache_size
+        self._block_tracker = BlockTracker(etherscan_client)
         logging.debug("TransactionChecker initialized")
 
     def _handle_etherscan_error(
@@ -131,156 +125,42 @@ class TransactionChecker:
 
         return all_transactions
 
-    def _filter_transactions(
-        self, all_transactions: List[dict], start_block: int
-    ) -> List[dict]:
-        """
-        Filter transactions by block, age, and limit the count.
+    # --- Delegating wrappers (keep tests and call sites that reference private methods working) ---
 
-        Args:
-            all_transactions: List of all transactions to filter
-            start_block: Block number to filter from (exclusive)
+    def _parse_timestamp(self, timestamp_str: str):
+        from usdt_monitor_bot.transaction_parser import parse_timestamp
+        return parse_timestamp(timestamp_str)
 
-        Returns:
-            Filtered and sorted list of transactions ready for processing
-        """
-        current_time = datetime.now(timezone.utc)
-        max_age_seconds = self._config.max_transaction_age_days * 24 * 60 * 60
+    def _convert_to_transaction_metadata(self, tx: dict, token_decimals: int):
+        return convert_to_transaction_metadata(tx, token_decimals)
 
-        filtered = []
-        for tx in all_transactions:
-            try:
-                if int(tx.get("blockNumber", 0)) <= start_block:
-                    continue
+    def _convert_db_transaction_to_metadata(self, db_tx: dict):
+        return convert_db_transaction_to_metadata(db_tx)
 
-                age_seconds = (
-                    current_time
-                    - datetime.fromtimestamp(
-                        int(tx.get("timeStamp", 0)), tz=timezone.utc
-                    )
-                ).total_seconds()
+    def _filter_transactions(self, all_transactions: List[dict], start_block: int) -> List[dict]:
+        return filter_transactions(
+            all_transactions,
+            start_block,
+            self._config.max_transaction_age_days,
+            self._config.max_transactions_per_check,
+        )
 
-                if age_seconds > max_age_seconds:
-                    logging.debug(f"Skip old tx: {tx.get('hash', '')[:16]}...")
-                    continue
+    def _format_transaction_log(self, tx_metadata, token_symbol, address_lower, risk_analysis):
+        return format_transaction_log(tx_metadata, token_symbol, address_lower, risk_analysis)
 
-                filtered.append(tx)
-            except (ValueError, TypeError) as e:
-                logging.debug(f"Invalid tx data {tx.get('hash', 'N/A')[:16]}: {e}")
+    async def _determine_next_block(
+        self,
+        start_block: int,
+        new_last_block: int,
+        raw_transactions: List[dict],
+        address_lower: str,
+        latest_block=None,
+    ):
+        return await self._block_tracker.determine_next_block(
+            start_block, new_last_block, raw_transactions, address_lower, latest_block
+        )
 
-        # Sort by block number descending to get the newest transactions first
-        filtered.sort(key=lambda x: int(x.get("blockNumber", 0)), reverse=True)
-
-        # Limit the number of transactions and then sort them chronologically for processing
-        processing_batch = filtered[: self._config.max_transactions_per_check]
-        processing_batch.sort(key=lambda x: int(x.get("blockNumber", 0)))
-
-        return processing_batch
-
-    def _convert_to_transaction_metadata(
-        self, tx: dict, token_decimals: int
-    ) -> Optional[TransactionMetadata]:
-        """
-        Convert Etherscan transaction dict to TransactionMetadata.
-
-        Args:
-            tx: Transaction dictionary from Etherscan API
-            token_decimals: Number of decimals for the token (e.g., 6 for USDT)
-
-        Returns:
-            TransactionMetadata object or None if conversion fails
-        """
-        try:
-            tx_hash = tx.get("hash")
-            from_address = tx.get("from", "")
-            to_address = tx.get("to", "")
-            block_number = int(tx.get("blockNumber", 0))
-            timestamp_str = tx.get("timeStamp", "0")
-            value_str = tx.get("value", "0")
-
-            if not tx_hash or not from_address or not to_address:
-                logging.debug(f"Missing fields in tx: {tx.get('hash', 'N/A')[:16]}")
-                return None
-
-            # Convert timestamp
-            try:
-                timestamp = datetime.fromtimestamp(int(timestamp_str), tz=timezone.utc)
-            except (ValueError, TypeError) as e:
-                logging.debug(f"Invalid timestamp in tx {tx_hash[:16]}: {e}")
-                return None
-
-            # Convert value from token units to USDT (divide by 10^decimals)
-            try:
-                value_raw = Decimal(value_str)
-                value_usdt = value_raw / Decimal(10**token_decimals)
-            except (ValueError, TypeError) as e:
-                logging.debug(f"Invalid value in tx {tx_hash[:16]}: {e}")
-                return None
-
-            return TransactionMetadata(
-                tx_hash=tx_hash,
-                from_address=from_address,
-                to_address=to_address,
-                value=value_usdt,
-                block_number=block_number,
-                timestamp=timestamp,
-                is_new_address=False,  # Set by caller after database check
-                contract_age_blocks=0,  # Set by caller after Etherscan query
-                gas_price=0,  # Not available in token transfer API
-            )
-        except Exception as e:
-            logging.debug(f"Metadata conversion error: {e}", exc_info=True)
-            return None
-
-    def _parse_timestamp(self, timestamp_str: str) -> Optional[datetime]:
-        """
-        Parse timestamp from database format (ISO or Unix).
-
-        Args:
-            timestamp_str: Timestamp string from database
-
-        Returns:
-            Parsed datetime or None if invalid
-        """
-        try:
-            if "T" in timestamp_str or "+" in timestamp_str:
-                return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-            return datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
-        except (ValueError, TypeError):
-            logging.debug(f"Invalid DB timestamp: {timestamp_str}")
-            return None
-
-    def _convert_db_transaction_to_metadata(
-        self, db_tx: dict
-    ) -> Optional[TransactionMetadata]:
-        """
-        Convert database transaction dict to TransactionMetadata.
-
-        Args:
-            db_tx: Transaction dictionary from database
-
-        Returns:
-            TransactionMetadata or None if conversion fails
-        """
-        timestamp = self._parse_timestamp(db_tx.get("timestamp", ""))
-        if timestamp is None:
-            return None
-
-        try:
-            return TransactionMetadata(
-                tx_hash=db_tx.get("tx_hash", ""),
-                from_address=db_tx.get("from_address", ""),
-                to_address=db_tx.get("to_address", ""),
-                value=Decimal(str(db_tx.get("value", 0))),
-                block_number=db_tx.get("block_number", 0),
-                timestamp=timestamp,
-                is_new_address=False,  # Will be determined separately
-                contract_age_blocks=0,  # Not stored in DB
-                gas_price=0,
-            )
-        except Exception as e:
-            logging.debug(f"DB tx conversion error: {e}", exc_info=True)
-            return None
+    # --- End delegating wrappers ---
 
     async def _get_historical_transactions_metadata(
         self, address_lower: str, limit: int = 20
@@ -302,7 +182,7 @@ class TransactionChecker:
             historical_metadata = []
 
             for db_tx in db_transactions:
-                metadata = self._convert_db_transaction_to_metadata(db_tx)
+                metadata = convert_db_transaction_to_metadata(db_tx)
                 if metadata:
                     historical_metadata.append(metadata)
 
@@ -351,54 +231,6 @@ class TransactionChecker:
             self._contract_creation_cache[address_lower] = None
 
         return 0  # Default to 0 if unable to determine
-
-    def _format_transaction_log(
-        self,
-        tx_metadata: TransactionMetadata,
-        token_symbol: str,
-        address_lower: str,
-        risk_analysis: RiskAnalysis,
-    ) -> str:
-        """
-        Format a compact, informative log line for a detected transaction.
-
-        Args:
-            tx_metadata: Transaction metadata
-            token_symbol: Token symbol (USDT, USDC, etc.)
-            address_lower: The monitored address
-            risk_analysis: Risk analysis result
-
-        Returns:
-            Formatted log string
-        """
-        # Direction indicator
-        is_incoming = tx_metadata.to_address.lower() == address_lower
-        direction = "IN" if is_incoming else "OUT"
-
-        # Amount formatting - format Decimal directly to preserve precision
-        amount = f"{tx_metadata.value:.2f}"
-
-        # Whitelist status
-        is_whitelisted = (risk_analysis.details or {}).get("whitelisted", False)
-        whitelist_status = "WL" if is_whitelisted else ""
-
-        # Spam status
-        if risk_analysis.is_suspicious:
-            spam_status = f"SPAM:{risk_analysis.score}"
-        else:
-            spam_status = f"OK:{risk_analysis.score}"
-
-        # Build compact log
-        parts = [
-            f"TX {direction}",
-            f"{amount} {token_symbol}",
-            f"score={spam_status}",
-        ]
-        if whitelist_status:
-            parts.append(whitelist_status)
-
-        tx_short = tx_metadata.tx_hash[:10]
-        return f"[{tx_short}] {' | '.join(parts)}"
 
     async def _enrich_transaction_metadata(
         self,
@@ -528,9 +360,7 @@ class TransactionChecker:
         tx_metadata: Optional[TransactionMetadata] = None
 
         if token_config and self._spam_detection_enabled:
-            tx_metadata = self._convert_to_transaction_metadata(
-                tx, token_config.decimals
-            )
+            tx_metadata = convert_to_transaction_metadata(tx, token_config.decimals)
             if tx_metadata:
                 risk_analysis = await self._enrich_transaction_metadata(
                     tx_metadata, address_lower, historical_metadata
@@ -538,7 +368,7 @@ class TransactionChecker:
                 historical_metadata.append(tx_metadata)
 
                 # Log detected transaction with compact format
-                log_line = self._format_transaction_log(
+                log_line = format_transaction_log(
                     tx_metadata, tx_token_symbol, address_lower, risk_analysis
                 )
                 if risk_analysis.is_suspicious:
@@ -628,7 +458,7 @@ class TransactionChecker:
             # No transactions found - return start_block to indicate we've checked up to this point
             # The caller will update the block number to record the check
             # Cap start_block to latest_block if available to prevent getting ahead of blockchain
-            final_block = self._cap_block_to_latest(
+            final_block = self._block_tracker.cap_block_to_latest(
                 start_block,
                 latest_block,
                 address_lower,
@@ -640,11 +470,16 @@ class TransactionChecker:
         # But cap it to latest_block if available to prevent getting ahead of blockchain
         tx_block_numbers = [int(tx.get("blockNumber", 0)) for tx in all_transactions]
         max_seen_block = max(tx_block_numbers) if tx_block_numbers else 0
-        max_seen_block = self._cap_block_to_latest(
+        max_seen_block = self._block_tracker.cap_block_to_latest(
             max_seen_block, latest_block, address_lower
         )
 
-        processing_batch = self._filter_transactions(all_transactions, start_block)
+        processing_batch = filter_transactions(
+            all_transactions,
+            start_block,
+            self._config.max_transaction_age_days,
+            self._config.max_transactions_per_check,
+        )
         # Dedupe by tx_hash: API can return duplicate events (same tx in multiple token responses,
         # or multiple transfer events for the same token in one tx). Notify at most once per user per tx per cycle.
         seen_hashes: set[str] = set()
@@ -660,7 +495,7 @@ class TransactionChecker:
             logging.debug(f"No tx after filtering for {address_lower[:8]}...")
             # Cap to latest_block if available to prevent getting ahead of blockchain
             result_block = max(start_block, max_seen_block)
-            result_block = self._cap_block_to_latest(
+            result_block = self._block_tracker.cap_block_to_latest(
                 result_block,
                 latest_block,
                 address_lower,
@@ -689,249 +524,10 @@ class TransactionChecker:
         new_last_block = max(start_block, max_seen_block)
         # Cap new_last_block to latest_block if available to prevent getting ahead of blockchain
         # This handles the case where start_block is already ahead of latest_block
-        new_last_block = self._cap_block_to_latest(
+        new_last_block = self._block_tracker.cap_block_to_latest(
             new_last_block, latest_block, address_lower
         )
         return (new_last_block, processed_count, max_block_in_batch)
-
-    def _cap_block_to_latest(
-        self,
-        block_value: int,
-        latest_block: Optional[int],
-        address_lower: str,
-        context: str = "",
-        log_level: Literal["debug", "warning"] = "debug",
-    ) -> int:
-        """
-        Cap a block number to the latest blockchain block to prevent getting ahead.
-
-        Args:
-            block_value: The block number to potentially cap
-            latest_block: The latest block number from blockchain (None if unavailable)
-            address_lower: The monitored address for logging
-            context: Additional context for the log message (e.g., "no transactions found")
-            log_level: Logging level - "debug" or "warning" (default: "debug")
-
-        Returns:
-            The capped block value (or original if no capping needed)
-        """
-        if latest_block is not None and block_value > latest_block:
-            context_str = f" ({context})" if context else ""
-            msg = f"Capping block {block_value}->{latest_block} for {address_lower[:8]}...{context_str}"
-            if log_level == "warning":
-                logging.warning(msg)
-            else:
-                logging.debug(msg)
-            return latest_block
-        return block_value
-
-    def _handle_latest_block_unavailable(
-        self,
-        start_block: int,
-        new_last_block: int,
-        raw_transactions: List[dict],
-        address_lower: str,
-    ) -> BlockDeterminationResult:
-        """
-        Handle case when latest block number cannot be retrieved.
-
-        Args:
-            start_block: The starting block number
-            new_last_block: The block number from processing
-            raw_transactions: List of raw transactions found
-            address_lower: The monitored address for logging
-
-        Returns:
-            BlockDeterminationResult
-        """
-        final_block = new_last_block
-        # Only advance if no transactions found to prevent getting stuck
-        if not raw_transactions and new_last_block == start_block:
-            final_block = start_block + 1
-            logging.warning(
-                f"No latest block for {address_lower[:8]}..., advancing {start_block}->{final_block}"
-            )
-        return BlockDeterminationResult(
-            final_block_number=final_block,
-            resetting_to_latest=False,
-        )
-
-    def _sync_block_with_blockchain(
-        self,
-        start_block: int,
-        new_last_block: int,
-        latest_block: int,
-        address_lower: str,
-    ) -> tuple[int, bool]:
-        """
-        Sync block number with actual blockchain state.
-
-        Args:
-            start_block: The starting block number
-            new_last_block: The block number from processing
-            latest_block: The latest block from blockchain
-            address_lower: The monitored address for logging
-
-        Returns:
-            Tuple of (final_block, resetting_to_latest)
-        """
-        resetting_to_latest = False
-
-        if latest_block < start_block:
-            logging.warning(
-                f"DB ahead of chain for {address_lower[:8]}...: {start_block}->{latest_block}"
-            )
-            return latest_block, True
-
-        if new_last_block > latest_block:
-            logging.warning(
-                f"Block cap for {address_lower[:8]}...: {new_last_block}->{latest_block}"
-            )
-            return latest_block, True
-
-        return new_last_block, resetting_to_latest
-
-    async def _determine_next_block(
-        self,
-        start_block: int,
-        new_last_block: int,
-        raw_transactions: List[dict],
-        address_lower: str,
-        latest_block: Optional[int] = None,
-    ) -> BlockDeterminationResult:
-        """
-        Determine the next block number to check, verifying against actual blockchain.
-
-        Args:
-            start_block: The starting block number from the database
-            new_last_block: The block number determined from processing transactions
-            raw_transactions: List of raw transactions found (empty if none)
-            address_lower: The monitored address (lowercase) for logging
-
-        Returns:
-            BlockDeterminationResult with final_block_number and resetting_to_latest flag
-        """
-        # Fetch latest block if not provided (for backward compatibility)
-        if latest_block is None:
-            latest_block = await self._etherscan.get_latest_block_number()
-
-        # Handle case when latest block cannot be retrieved
-        if latest_block is None:
-            return self._handle_latest_block_unavailable(
-                start_block, new_last_block, raw_transactions, address_lower
-            )
-
-        # Sync with blockchain
-        final_block, resetting_to_latest = self._sync_block_with_blockchain(
-            start_block, new_last_block, latest_block, address_lower
-        )
-
-        # If no transactions found and blockchain hasn't advanced, update to latest
-        if not raw_transactions and final_block == start_block:
-            if latest_block >= start_block:
-                logging.debug(
-                    f"Advance {address_lower[:8]}... {start_block}->{latest_block}"
-                )
-                final_block = latest_block
-
-        return BlockDeterminationResult(
-            final_block_number=final_block,
-            resetting_to_latest=resetting_to_latest,
-        )
-
-    async def _process_single_address(
-        self,
-        address_lower: str,
-        stats: dict,
-        update_tasks: list,
-    ) -> None:
-        """
-        Process a single address: fetch, analyze, and update block number.
-
-        Args:
-            address_lower: The address to process (lowercase)
-            stats: Dictionary to update with statistics
-            update_tasks: List to append block update tasks
-        """
-        try:
-            await asyncio.sleep(self._config.etherscan_request_delay)
-            start_block = await self._db.get_last_checked_block(address_lower)
-
-            logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
-
-            # Fetch latest block early to cap transaction block numbers
-            latest_block = await self._etherscan.get_latest_block_number()
-            if latest_block is None:
-                logging.debug(
-                    f"No latest block for {address_lower[:8]}..., proceeding without cap"
-                )
-
-            raw_transactions = await self._fetch_transactions_for_address(
-                address_lower, start_block + 1
-            )
-
-            stats["total_transactions_found"] += len(raw_transactions)
-            if raw_transactions:
-                stats["addresses_with_transactions"] += 1
-
-            (
-                new_last_block,
-                processed_count,
-                max_block_in_processed_batch,
-            ) = await self._process_address_transactions(
-                address_lower, raw_transactions, start_block, latest_block
-            )
-            stats["total_transactions_processed"] += processed_count
-
-            # Determine next block and update if needed
-            block_result = await self._determine_next_block(
-                start_block,
-                new_last_block,
-                raw_transactions,
-                address_lower,
-                latest_block,
-            )
-
-            if self._should_update_block(start_block, block_result):
-                # Final defensive check: ensure we never update database with a value ahead of blockchain
-                # Fetch latest_block one more time right before update to catch any race conditions
-                final_latest_block = await self._etherscan.get_latest_block_number()
-                final_block_to_update = self._cap_block_to_latest(
-                    block_result.final_block_number,
-                    final_latest_block,
-                    address_lower,
-                    context="defensive check before database update",
-                    log_level="warning",
-                )
-                # Never persist a block lower than the highest we already processed, or we will
-                # re-fetch and re-notify the same transactions next cycle (e.g. when API returns
-                # txs in blocks ahead of reported "latest" block)
-                if max_block_in_processed_batch > 0:
-                    final_block_to_update = max(
-                        final_block_to_update, max_block_in_processed_batch
-                    )
-
-                self._log_block_update(
-                    address_lower, start_block, block_result, final_block_to_update
-                )
-                update_tasks.append(
-                    self._db.update_last_checked_block(
-                        address_lower, final_block_to_update
-                    )
-                )
-                stats["addresses_updated"] += 1
-
-        except EtherscanRateLimitError:
-            logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
-            stats["warnings_count"] += 1
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logging.error(f"Network error {address_lower[:8]}...: {e}")
-            stats["errors_count"] += 1
-        except Exception as e:
-            logging.error(
-                f"Error processing {address_lower[:8]}...: {e}", exc_info=True
-            )
-            stats["errors_count"] += 1
 
     def _should_update_block(
         self, start_block: int, block_result: BlockDeterminationResult
@@ -990,6 +586,100 @@ class TransactionChecker:
             f"updated={stats['addresses_updated']} err={errors} warn={warnings}"
         )
 
+    async def _process_single_address(
+        self,
+        address_lower: str,
+        stats: dict,
+        update_tasks: list,
+    ) -> None:
+        """
+        Process a single address: fetch, analyze, and update block number.
+
+        Args:
+            address_lower: The address to process (lowercase)
+            stats: Dictionary to update with statistics
+            update_tasks: List to append block update tasks
+        """
+        try:
+            await asyncio.sleep(self._config.etherscan_request_delay)
+            start_block = await self._db.get_last_checked_block(address_lower)
+
+            logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
+
+            # Fetch latest block early to cap transaction block numbers
+            latest_block = await self._etherscan.get_latest_block_number()
+            if latest_block is None:
+                logging.debug(
+                    f"No latest block for {address_lower[:8]}..., proceeding without cap"
+                )
+
+            raw_transactions = await self._fetch_transactions_for_address(
+                address_lower, start_block + 1
+            )
+
+            stats["total_transactions_found"] += len(raw_transactions)
+            if raw_transactions:
+                stats["addresses_with_transactions"] += 1
+
+            (
+                new_last_block,
+                processed_count,
+                max_block_in_processed_batch,
+            ) = await self._process_address_transactions(
+                address_lower, raw_transactions, start_block, latest_block
+            )
+            stats["total_transactions_processed"] += processed_count
+
+            # Determine next block and update if needed
+            block_result = await self._block_tracker.determine_next_block(
+                start_block,
+                new_last_block,
+                raw_transactions,
+                address_lower,
+                latest_block,
+            )
+
+            if self._should_update_block(start_block, block_result):
+                # Final defensive check: ensure we never update database with a value ahead of blockchain
+                # Fetch latest_block one more time right before update to catch any race conditions
+                final_latest_block = await self._etherscan.get_latest_block_number()
+                final_block_to_update = self._block_tracker.cap_block_to_latest(
+                    block_result.final_block_number,
+                    final_latest_block,
+                    address_lower,
+                    context="defensive check before database update",
+                    log_level="warning",
+                )
+                # Never persist a block lower than the highest we already processed, or we will
+                # re-fetch and re-notify the same transactions next cycle (e.g. when API returns
+                # txs in blocks ahead of reported "latest" block)
+                if max_block_in_processed_batch > 0:
+                    final_block_to_update = max(
+                        final_block_to_update, max_block_in_processed_batch
+                    )
+
+                self._log_block_update(
+                    address_lower, start_block, block_result, final_block_to_update
+                )
+                update_tasks.append(
+                    self._db.update_last_checked_block(
+                        address_lower, final_block_to_update
+                    )
+                )
+                stats["addresses_updated"] += 1
+
+        except EtherscanRateLimitError:
+            logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
+            stats["warnings_count"] += 1
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logging.error(f"Network error {address_lower[:8]}...: {e}")
+            stats["errors_count"] += 1
+        except Exception as e:
+            logging.error(
+                f"Error processing {address_lower[:8]}...: {e}", exc_info=True
+            )
+            stats["errors_count"] += 1
+
     async def check_all_addresses(self) -> None:
         """
         Main entry point: check all tracked addresses for new transactions.
@@ -998,7 +688,7 @@ class TransactionChecker:
         transactions for each address, updating block numbers and sending
         notifications as needed.
         """
-        cycle_start_time = time.time()
+        cycle_start_time = time.monotonic()
         addresses_to_check = await self._db.get_distinct_addresses()
 
         if not addresses_to_check:
@@ -1024,5 +714,5 @@ class TransactionChecker:
             logging.debug(f"Updating blocks for {len(update_tasks)} addresses")
             await asyncio.gather(*update_tasks, return_exceptions=True)
 
-        cycle_duration = time.time() - cycle_start_time
+        cycle_duration = time.monotonic() - cycle_start_time
         self._log_cycle_summary(stats, cycle_duration, len(addresses_to_check))
