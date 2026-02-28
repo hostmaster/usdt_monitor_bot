@@ -25,7 +25,7 @@ from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
 from usdt_monitor_bot.notifier import NotificationService
-from usdt_monitor_bot.spam_detector import enable_spam_detector_debugging
+from usdt_monitor_bot.spam_detector import SpamDetector, enable_spam_detector_debugging
 
 
 def _setup_signal_handlers(shutdown_event: asyncio.Event) -> None:
@@ -95,11 +95,16 @@ async def main() -> None:
     # 8. Initialize Services
     etherscan_client = EtherscanClient(config=config)
     notifier = NotificationService(bot=bot, config=config)
+    spam_detector = SpamDetector(
+        config=config.spam_detector_config,
+        enable_debug_logging=config.spam_detection_debug,
+    )
     transaction_checker = TransactionChecker(
         config=config,
         db_manager=db_manager,
         etherscan_client=etherscan_client,
         notifier=notifier,
+        spam_detector=spam_detector,
     )
 
     # 9. Register Handlers

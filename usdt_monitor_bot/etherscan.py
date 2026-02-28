@@ -85,7 +85,7 @@ class AdaptiveRateLimiter:
             self._current_delay * self._backoff_factor, self._max_delay
         )
         self._consecutive_successes = 0
-        self._last_rate_limit_time = time.time()
+        self._last_rate_limit_time = time.monotonic()
         logging.info(f"Rate limit hit, delay={self._current_delay:.2f}s")
 
     def on_success(self) -> None:
@@ -94,7 +94,7 @@ class AdaptiveRateLimiter:
 
         # Only reduce delay after a threshold of consecutive successes
         # and if enough time has passed since last rate limit
-        time_since_rate_limit = time.time() - self._last_rate_limit_time
+        time_since_rate_limit = time.monotonic() - self._last_rate_limit_time
         if (
             self._consecutive_successes >= self._success_threshold
             and time_since_rate_limit > self._recovery_cooldown
