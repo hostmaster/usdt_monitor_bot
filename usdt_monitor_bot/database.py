@@ -146,7 +146,7 @@ class DatabaseManager:
             conn.execute("BEGIN")
             conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history_new"))
             conn.execute(
-                f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "
+                f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "  # nosec B608
                 f"SELECT {_TRANSACTION_HISTORY_COLUMNS} FROM transaction_history"
             )
             conn.execute("DROP TABLE transaction_history")
