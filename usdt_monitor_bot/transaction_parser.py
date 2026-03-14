@@ -158,14 +158,9 @@ def filter_transactions(
         except (ValueError, TypeError) as e:
             logging.debug(f"Invalid tx data {tx.get('hash', 'N/A')[:16]}: {e}")
 
-    # Sort by block number descending to get the newest transactions first
-    filtered.sort(key=lambda x: int(x.get("blockNumber", 0)), reverse=True)
-
-    # Limit the number of transactions and then sort them chronologically for processing
-    processing_batch = filtered[:max_per_check]
-    processing_batch.sort(key=lambda x: int(x.get("blockNumber", 0)))
-
-    return processing_batch
+    # Sort ascending, then take the last N to get the newest, already in chronological order
+    filtered.sort(key=lambda x: int(x.get("blockNumber", 0)))
+    return filtered[-max_per_check:] if max_per_check < len(filtered) else filtered
 
 
 def format_transaction_log(

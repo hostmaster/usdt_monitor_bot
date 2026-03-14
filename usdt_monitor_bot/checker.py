@@ -353,7 +353,8 @@ class TransactionChecker:
         # Get token config
         token_config = self._config.token_registry.get_token(tx_token_symbol)
         if not token_config:
-            logging.debug(f"Unknown token {tx_token_symbol}, skip spam detection")
+            logging.debug(f"Unknown token {tx_token_symbol}, skipping transaction")
+            return 0
 
         # Process with spam detection (only if token config is available)
         risk_analysis: Optional[RiskAnalysis] = None

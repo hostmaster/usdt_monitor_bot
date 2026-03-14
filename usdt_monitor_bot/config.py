@@ -282,7 +282,7 @@ def load_config() -> BotConfig:
         verbose_logging=verbose_logging,
         spam_detection_debug=spam_detection_debug,
         notification_dedup_cache_size=notification_dedup_cache_size,
-        spam_detector_config=spam_detector_config if spam_detector_config else None,
+        spam_detector_config=spam_detector_config or None,
     )
 
     # Token configuration overrides
