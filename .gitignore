@@ -170,3 +170,6 @@ cython_debug/
 *.txt
 !requirements.txt
 .env
+
+.claude  
+CLAUDE.md
