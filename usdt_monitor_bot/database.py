@@ -15,6 +15,29 @@ from enum import Enum, auto
 from typing import List, Optional
 
 
+# Shared schema constants used by both _init_db_sync and the FK migration so
+# they can never drift out of sync with each other.
+_TRANSACTION_HISTORY_COLUMNS = (
+    "tx_hash, monitored_address, from_address, to_address, value, "
+    "block_number, timestamp, token_symbol, risk_score, created_at"
+)
+_TRANSACTION_HISTORY_DDL = """
+    CREATE TABLE {name} (
+        tx_hash TEXT PRIMARY KEY,
+        monitored_address TEXT NOT NULL,
+        from_address TEXT NOT NULL,
+        to_address TEXT NOT NULL,
+        value REAL NOT NULL,
+        block_number INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        token_symbol TEXT NOT NULL,
+        risk_score INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address) ON DELETE CASCADE
+    )
+"""
+
+
 class WalletAddResult(Enum):
     """Result of wallet addition operation."""
 
@@ -93,6 +116,60 @@ class DatabaseManager:
             return await loop.run_in_executor(None, functools.partial(func, *args))
 
     # --- Initialization ---
+    def _migrate_transaction_history_fk_sync(self) -> bool:
+        """
+        Migrate transaction_history to add ON DELETE CASCADE to the FK constraint.
+
+        SQLite does not support ALTER TABLE for constraint changes, so this
+        performs a rename-copy-rename migration. Skipped if the table already
+        has the CASCADE clause (i.e. new databases or already-migrated ones).
+
+        Returns:
+            True if migration was not needed or succeeded, False on error.
+        """
+        try:
+            conn = sqlite3.connect(
+                self.db_path, timeout=self.timeout, check_same_thread=False
+            )
+            # Check whether the table already carries ON DELETE CASCADE (case-insensitive)
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
+            ).fetchone()
+            if row is None:
+                conn.close()
+                return True  # Table doesn't exist yet; CREATE TABLE will handle it
+            if "on delete cascade" in (row[0] or "").lower():
+                conn.close()
+                return True  # Already correct, nothing to do
+
+            logging.info("Migrating transaction_history FK to ON DELETE CASCADE...")
+            conn.execute("PRAGMA foreign_keys = OFF")
+            with conn:  # context manager handles BEGIN / COMMIT / ROLLBACK automatically
+                conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history_new"))
+                conn.execute(
+                    f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "  # nosec B608
+                    f"SELECT {_TRANSACTION_HISTORY_COLUMNS} FROM transaction_history"
+                )
+                conn.execute("DROP TABLE transaction_history")
+                conn.execute(
+                    "ALTER TABLE transaction_history_new RENAME TO transaction_history"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address "
+                    "ON transaction_history(monitored_address, block_number DESC)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp "
+                    "ON transaction_history(timestamp)"
+                )
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.close()
+            logging.info("transaction_history FK migration complete")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"FK migration failed: {e}")
+            return False
+
     def _init_db_sync(self) -> bool:
         """
         Synchronously initialize database tables.
@@ -103,6 +180,8 @@ class DatabaseManager:
             True if initialization succeeded, False otherwise
         """
         logging.debug("Initializing database tables...")
+        if not self._migrate_transaction_history_fk_sync():
+            return False
         queries = [
             """CREATE TABLE IF NOT EXISTS users (
                    user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_name TEXT,
@@ -119,19 +198,7 @@ class DatabaseManager:
                    last_checked_block INTEGER DEFAULT 0,
                    last_check_time TIMESTAMP
                )""",
-            """CREATE TABLE IF NOT EXISTS transaction_history (
-                   tx_hash TEXT PRIMARY KEY,
-                   monitored_address TEXT NOT NULL,
-                   from_address TEXT NOT NULL,
-                   to_address TEXT NOT NULL,
-                   value REAL NOT NULL,
-                   block_number INTEGER NOT NULL,
-                   timestamp TEXT NOT NULL,
-                   token_symbol TEXT NOT NULL,
-                   risk_score INTEGER,
-                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                   FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address)
-               )""",
+            _TRANSACTION_HISTORY_DDL.format(name="IF NOT EXISTS transaction_history"),
             """CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address
                    ON transaction_history(monitored_address, block_number DESC)""",
             """CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp

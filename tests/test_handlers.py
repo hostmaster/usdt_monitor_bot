@@ -12,6 +12,7 @@ from usdt_monitor_bot.handlers import (
     list_wallets_handler,
     other_message_handler,
     remove_wallet_handler,
+    spam_report_handler,
 )
 
 # --- Define constants for testing ---
@@ -336,3 +337,74 @@ async def test_add_wallet_response_shows_normalized_address(
     # Should use lowercase in response
     expected_message = messages.add_wallet_success(VALID_ADDRESS_UPPER.lower())
     mock_message.reply.assert_awaited_once_with(expected_message)
+
+
+# --- /spam handler ---
+
+
+async def test_spam_report_empty(mock_message: AsyncMock, mock_db_manager: AsyncMock):
+    """Returns SPAM_REPORT_EMPTY when no spam found."""
+    mock_db_manager.get_spam_summary_for_user.return_value = {"count": 0}
+    mock_db_manager.get_spam_transactions_for_user.return_value = []
+
+    await spam_report_handler(mock_message, mock_db_manager)
+
+    mock_message.reply.assert_awaited_once_with(messages.SPAM_REPORT_EMPTY)
+
+
+async def test_spam_report_with_data(mock_message: AsyncMock, mock_db_manager: AsyncMock):
+    """Returns formatted spam report when spam transactions exist."""
+    summary = {"count": 2, "total_value": 0.05, "avg_score": 70, "max_score": 90}
+    transactions = [
+        {
+            "tx_hash": "0xspam1",
+            "monitored_address": "0xaddr",
+            "from_address": "0xfrom",
+            "to_address": "0xto",
+            "value": 0.01,
+            "block_number": 100,
+            "timestamp": "2025-01-01T00:00:00+00:00",
+            "token_symbol": "USDT",
+            "risk_score": 75,
+        }
+    ]
+    mock_db_manager.get_spam_summary_for_user.return_value = summary
+    mock_db_manager.get_spam_transactions_for_user.return_value = transactions
+
+    await spam_report_handler(mock_message, mock_db_manager)
+
+    mock_message.reply.assert_awaited_once()
+    call_kwargs = mock_message.reply.call_args
+    assert call_kwargs.kwargs.get("parse_mode") == "HTML"
+
+
+async def test_spam_report_no_user(mock_message: AsyncMock, mock_db_manager: AsyncMock):
+    """Returns early without doing anything when from_user is None."""
+    mock_message.from_user = None
+
+    await spam_report_handler(mock_message, mock_db_manager)
+
+    mock_db_manager.get_spam_summary_for_user.assert_not_awaited()
+    mock_message.reply.assert_not_awaited()
+
+
+async def test_spam_report_db_error(mock_message: AsyncMock, mock_db_manager: AsyncMock):
+    """Returns SPAM_REPORT_ERROR when DB raises exception."""
+    mock_db_manager.get_spam_summary_for_user.side_effect = Exception("DB down")
+
+    await spam_report_handler(mock_message, mock_db_manager)
+
+    mock_message.reply.assert_awaited_once_with(messages.SPAM_REPORT_ERROR)
+
+
+async def test_spam_report_calls_add_user(mock_message: AsyncMock, mock_db_manager: AsyncMock):
+    """Ensures user is upserted before querying spam data."""
+    mock_db_manager.get_spam_summary_for_user.return_value = {"count": 0}
+    mock_db_manager.get_spam_transactions_for_user.return_value = []
+    user = mock_message.from_user
+
+    await spam_report_handler(mock_message, mock_db_manager)
+
+    mock_db_manager.add_user.assert_awaited_once_with(
+        user.id, user.username, user.first_name, user.last_name
+    )

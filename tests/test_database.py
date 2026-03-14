@@ -1,9 +1,14 @@
 # tests/test_database.py
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from usdt_monitor_bot.database import DatabaseManager, WalletAddResult
+from usdt_monitor_bot.database import (
+    DatabaseManager,
+    WalletAddResult,
+    _TRANSACTION_HISTORY_DDL,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -619,3 +624,286 @@ async def test_store_transaction_with_null_risk_score(
     recent = await memory_db_manager.get_recent_transactions(monitored_addr, limit=1)
     assert len(recent) == 1
     assert recent[0]["risk_score"] is None
+
+
+# --- Migration tests ---
+
+_OLD_TX_HISTORY_DDL = """
+    CREATE TABLE transaction_history (
+        tx_hash TEXT PRIMARY KEY,
+        monitored_address TEXT NOT NULL,
+        from_address TEXT NOT NULL,
+        to_address TEXT NOT NULL,
+        value REAL NOT NULL,
+        block_number INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        token_symbol TEXT NOT NULL,
+        risk_score INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address)
+    )
+"""
+
+
+def _create_old_schema_db(db_path: str) -> None:
+    """Create a DB with old transaction_history schema (no ON DELETE CASCADE)."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE users (
+            user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_name TEXT,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE wallets (
+            wallet_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+            address TEXT NOT NULL, added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            UNIQUE(user_id, address)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE tracked_addresses (
+            address TEXT PRIMARY KEY, last_checked_block INTEGER DEFAULT 0, last_check_time TIMESTAMP
+        )
+    """)
+    conn.execute(_OLD_TX_HISTORY_DDL)
+    conn.commit()
+    conn.close()
+
+
+async def test_migrate_fk_table_absent(tmp_path):
+    """Migration returns True when transaction_history table doesn't exist yet."""
+    db_path = str(tmp_path / "no_tx_table.sqlite")
+    # Create a DB with only tracked_addresses (no transaction_history)
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE tracked_addresses (address TEXT PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    db_manager = DatabaseManager(db_path=db_path)
+    result = db_manager._migrate_transaction_history_fk_sync()
+    assert result is True
+
+
+async def test_migrate_fk_already_has_cascade(tmp_path):
+    """Migration returns True without touching schema when CASCADE already present."""
+    db_path = str(tmp_path / "cascade_db.sqlite")
+    conn = sqlite3.connect(db_path)
+    # Create table WITH the correct ON DELETE CASCADE
+    conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history"))
+    conn.commit()
+    conn.close()
+
+    db_manager = DatabaseManager(db_path=db_path)
+    result = db_manager._migrate_transaction_history_fk_sync()
+    assert result is True
+
+    # Schema should still contain ON DELETE CASCADE (unchanged)
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert "on delete cascade" in row[0].lower()
+
+
+async def test_migrate_fk_performs_migration(tmp_path):
+    """Migration rewrites table to add ON DELETE CASCADE when it was missing."""
+    db_path = str(tmp_path / "old_schema.sqlite")
+    _create_old_schema_db(db_path)
+
+    # Verify old schema lacks CASCADE before migration
+    conn = sqlite3.connect(db_path)
+    row_before = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
+    ).fetchone()
+    conn.close()
+    assert "on delete cascade" not in (row_before[0] or "").lower()
+
+    db_manager = DatabaseManager(db_path=db_path)
+    result = db_manager._migrate_transaction_history_fk_sync()
+    assert result is True
+
+    # After migration the schema must have ON DELETE CASCADE
+    conn = sqlite3.connect(db_path)
+    row_after = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
+    ).fetchone()
+    conn.close()
+    assert row_after is not None
+    assert "on delete cascade" in row_after[0].lower()
+
+
+async def test_migrate_fk_preserves_existing_rows(tmp_path):
+    """Migration copies existing rows to the new table."""
+    db_path = str(tmp_path / "preserve_rows.sqlite")
+    _create_old_schema_db(db_path)
+
+    # Insert a row before migration
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO tracked_addresses (address) VALUES (?)", ("0xabc",))
+    conn.execute(
+        "INSERT INTO transaction_history "
+        "(tx_hash, monitored_address, from_address, to_address, value, block_number, timestamp, token_symbol) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("0xhash1", "0xabc", "0xfrom", "0xto", 1.0, 100, "2025-01-01T00:00:00+00:00", "USDT"),
+    )
+    conn.commit()
+    conn.close()
+
+    db_manager = DatabaseManager(db_path=db_path)
+    assert db_manager._migrate_transaction_history_fk_sync() is True
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT tx_hash FROM transaction_history").fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == "0xhash1"
+
+
+# --- Spam transaction queries ---
+
+async def _setup_user_with_spam(db: DatabaseManager, user_id: int, addr: str) -> None:
+    await db.add_user(user_id, f"u{user_id}", "U", str(user_id))
+    await db.add_wallet(user_id, addr)
+
+
+async def test_get_spam_transactions_empty(memory_db_manager: DatabaseManager):
+    """Returns empty list when no spam transactions exist."""
+    await _setup_user_with_spam(memory_db_manager, 801, "0xspam0000000000000000000000000000000000aa")
+    result = await memory_db_manager.get_spam_transactions_for_user(801)
+    assert result == []
+
+
+async def test_get_spam_transactions_returns_spam_only(memory_db_manager: DatabaseManager):
+    """Returns only transactions with risk_score >= threshold."""
+    addr = "0xspam0000000000000000000000000000000000bb"
+    await _setup_user_with_spam(memory_db_manager, 802, addr)
+
+    # Store one spam and one legit tx
+    await memory_db_manager.store_transaction(
+        "0xspam_tx", addr, "0xfrom1", "0xto1", 0.01, 100, "2025-01-01T00:00:00+00:00", "USDT", risk_score=75
+    )
+    await memory_db_manager.store_transaction(
+        "0xlegit_tx", addr, "0xfrom2", "0xto2", 50.0, 101, "2025-01-02T00:00:00+00:00", "USDT", risk_score=5
+    )
+
+    result = await memory_db_manager.get_spam_transactions_for_user(802)
+    assert len(result) == 1
+    assert result[0]["tx_hash"] == "0xspam_tx"
+    assert result[0]["risk_score"] == 75
+
+
+async def test_get_spam_transactions_respects_limit(memory_db_manager: DatabaseManager):
+    """Limit parameter caps number of returned rows."""
+    addr = "0xspam0000000000000000000000000000000000cc"
+    await _setup_user_with_spam(memory_db_manager, 803, addr)
+
+    for i in range(5):
+        await memory_db_manager.store_transaction(
+            f"0xspam_{i:04x}", addr, "0xfrom", "0xto", 0.01, 100 + i,
+            f"2025-01-0{i+1}T00:00:00+00:00", "USDT", risk_score=60 + i,
+        )
+
+    result = await memory_db_manager.get_spam_transactions_for_user(803, limit=3)
+    assert len(result) == 3
+
+
+async def test_get_spam_summary_empty(memory_db_manager: DatabaseManager):
+    """Summary returns zeros when no spam transactions exist."""
+    await _setup_user_with_spam(memory_db_manager, 804, "0xspam0000000000000000000000000000000000dd")
+    summary = await memory_db_manager.get_spam_summary_for_user(804)
+    assert summary["count"] == 0
+    assert summary["total_value"] == 0.0
+
+
+async def test_get_spam_summary_with_data(memory_db_manager: DatabaseManager):
+    """Summary computes correct aggregates over spam transactions."""
+    addr = "0xspam0000000000000000000000000000000000ee"
+    await _setup_user_with_spam(memory_db_manager, 805, addr)
+
+    await memory_db_manager.store_transaction(
+        "0xspam_a", addr, "0xfrom", "0xto", 10.0, 200, "2025-01-01T00:00:00+00:00", "USDT", risk_score=60
+    )
+    await memory_db_manager.store_transaction(
+        "0xspam_b", addr, "0xfrom", "0xto", 20.0, 201, "2025-01-02T00:00:00+00:00", "USDT", risk_score=80
+    )
+    # Below threshold, should not be counted
+    await memory_db_manager.store_transaction(
+        "0xlegit_c", addr, "0xfrom", "0xto", 100.0, 202, "2025-01-03T00:00:00+00:00", "USDT", risk_score=10
+    )
+
+    summary = await memory_db_manager.get_spam_summary_for_user(805)
+    assert summary["count"] == 2
+    assert summary["total_value"] == pytest.approx(30.0)
+    assert summary["max_score"] == 80
+    assert summary["avg_score"] == 70
+
+
+async def test_get_spam_transactions_only_own_addresses(memory_db_manager: DatabaseManager):
+    """User can only see spam from their own watched addresses."""
+    addr_user1 = "0xspam0000000000000000000000000000000000ff"
+    addr_user2 = "0xspam000000000000000000000000000000000100"
+    await _setup_user_with_spam(memory_db_manager, 806, addr_user1)
+    await _setup_user_with_spam(memory_db_manager, 807, addr_user2)
+
+    # Store spam for user2's address
+    await memory_db_manager.store_transaction(
+        "0xother_spam", addr_user2, "0xfrom", "0xto", 0.01, 300,
+        "2025-01-01T00:00:00+00:00", "USDT", risk_score=75
+    )
+
+    # User1 should see nothing
+    result = await memory_db_manager.get_spam_transactions_for_user(806)
+    assert result == []
+
+
+# --- cleanup_old_transactions ---
+
+
+async def test_cleanup_old_transactions_removes_old(memory_db_manager: DatabaseManager):
+    """Transactions older than days_to_keep are deleted."""
+    addr = "0xclean000000000000000000000000000000000aa"
+    await memory_db_manager.add_user(901, "u901", "U", "1")
+    await memory_db_manager.add_wallet(901, addr)
+
+    # Insert an old transaction (35 days ago)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
+    await memory_db_manager.store_transaction(
+        "0xold_tx", addr, "0xfrom", "0xto", 10.0, 100, old_ts, "USDT", risk_score=None
+    )
+    # Insert a recent transaction
+    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    await memory_db_manager.store_transaction(
+        "0xrecent_tx", addr, "0xfrom", "0xto", 20.0, 101, recent_ts, "USDT", risk_score=None
+    )
+
+    deleted = await memory_db_manager.cleanup_old_transactions(days_to_keep=30)
+    assert deleted == 1
+
+    remaining = await memory_db_manager.get_recent_transactions(addr, limit=10)
+    assert len(remaining) == 1
+    assert remaining[0]["tx_hash"] == "0xrecent_tx"
+
+
+async def test_cleanup_old_transactions_none_to_delete(memory_db_manager: DatabaseManager):
+    """Returns 0 when nothing is old enough to delete."""
+    addr = "0xclean000000000000000000000000000000000bb"
+    await memory_db_manager.add_user(902, "u902", "U", "2")
+    await memory_db_manager.add_wallet(902, addr)
+
+    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    await memory_db_manager.store_transaction(
+        "0xfresh_tx", addr, "0xfrom", "0xto", 5.0, 200, recent_ts, "USDT", risk_score=None
+    )
+
+    deleted = await memory_db_manager.cleanup_old_transactions(days_to_keep=30)
+    assert deleted == 0
+
+
+async def test_cleanup_old_transactions_empty_table(memory_db_manager: DatabaseManager):
+    """Returns 0 when transaction_history is empty."""
+    deleted = await memory_db_manager.cleanup_old_transactions(days_to_keep=30)
+    assert deleted == 0
