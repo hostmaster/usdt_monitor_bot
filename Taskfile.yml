@@ -7,27 +7,33 @@ vars:
 
 tasks:
   build:
-    desc: Build Docker image
+    desc: Build Docker image (linux/amd64, tagged with git SHA)
+    run: once
     cmds:
       - docker build --platform linux/amd64 -t {{.IMAGE}}:{{.TAG}} .
 
-  tag-stable:
-    desc: Tag Docker image as stable
-    cmds:
-      - docker tag {{.IMAGE}}:{{.TAG}} {{.IMAGE}}:stable
-    depends:
-      - build
-
-  push:
-    desc: Push Docker image to GitHub Container Registry
+  login:
+    desc: Login to GitHub Container Registry (requires CR_PAT env var)
+    run: once
     cmds:
       - echo "{{.CR_PAT}}" | docker login ghcr.io -u hostmaster --password-stdin
+
+  tag-stable:
+    desc: Tag and push image as stable
+    deps: [build, login]
+    cmds:
+      - docker tag {{.IMAGE}}:{{.TAG}} {{.IMAGE}}:stable
+      - docker push {{.IMAGE}}:stable
+
+  push:
+    desc: Push SHA-tagged image to GitHub Container Registry (requires CR_PAT env var)
+    deps: [build, login]
+    cmds:
       - docker push {{.IMAGE}}:{{.TAG}}
 
   all:
     desc: Build and push Docker image
     cmds:
-      - task: build
       - task: push
 
   run:
@@ -36,14 +42,14 @@ tasks:
       - docker compose up --build
 
   deploy:
-    desc: Deploy Docker container
+    desc: Build, push, tag stable, and sync to server
     cmds:
-      - task: build
       - task: push
+      - task: tag-stable
       - task: sync
 
   sync:
-    desc: Sync Docker container to server
+    desc: Sync config files to server (requires TARGET_HOST env var)
     cmds:
       - rsync -va -z .env $TARGET_HOST:tracker/
       - rsync -va -z docker-compose.prod.yml $TARGET_HOST:tracker/compose.yaml
@@ -51,5 +57,5 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - uv pip install --system -e ".[test]
+      - uv pip install --system -e ".[test,dev,security]"
       - pytest tests/ -v
