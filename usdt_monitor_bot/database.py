@@ -127,7 +127,6 @@ class DatabaseManager:
         Returns:
             True if migration was not needed or succeeded, False on error.
         """
-        conn = None
         try:
             conn = sqlite3.connect(
                 self.db_path, timeout=self.timeout, check_same_thread=False
@@ -137,48 +136,39 @@ class DatabaseManager:
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
             ).fetchone()
             if row is None:
+                conn.close()
                 return True  # Table doesn't exist yet; CREATE TABLE will handle it
             if "on delete cascade" in (row[0] or "").lower():
+                conn.close()
                 return True  # Already correct, nothing to do
 
             logging.info("Migrating transaction_history FK to ON DELETE CASCADE...")
             conn.execute("PRAGMA foreign_keys = OFF")
-            conn.execute("BEGIN")
-            conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history_new"))
-            conn.execute(
-                f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "  # nosec B608
-                f"SELECT {_TRANSACTION_HISTORY_COLUMNS} FROM transaction_history"
-            )
-            conn.execute("DROP TABLE transaction_history")
-            conn.execute(
-                "ALTER TABLE transaction_history_new RENAME TO transaction_history"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address "
-                "ON transaction_history(monitored_address, block_number DESC)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp "
-                "ON transaction_history(timestamp)"
-            )
-            conn.execute("COMMIT")
+            with conn:  # context manager handles BEGIN / COMMIT / ROLLBACK automatically
+                conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history_new"))
+                conn.execute(
+                    f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "  # nosec B608
+                    f"SELECT {_TRANSACTION_HISTORY_COLUMNS} FROM transaction_history"
+                )
+                conn.execute("DROP TABLE transaction_history")
+                conn.execute(
+                    "ALTER TABLE transaction_history_new RENAME TO transaction_history"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address "
+                    "ON transaction_history(monitored_address, block_number DESC)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp "
+                    "ON transaction_history(timestamp)"
+                )
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.close()
             logging.info("transaction_history FK migration complete")
             return True
         except sqlite3.Error as e:
             logging.error(f"FK migration failed: {e}")
-            if conn:
-                try:
-                    conn.execute("ROLLBACK")
-                except sqlite3.Error as rollback_err:
-                    logging.warning(f"Rollback failed during FK migration: {rollback_err}")
             return False
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except sqlite3.Error as close_err:
-                    logging.warning(f"Failed to close DB connection after FK migration: {close_err}")
 
     def _init_db_sync(self) -> bool:
         """

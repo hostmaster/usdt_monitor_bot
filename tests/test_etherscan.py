@@ -1,6 +1,5 @@
 # tests/test_etherscan.py
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp  # Import aiohttp

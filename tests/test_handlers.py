@@ -12,6 +12,7 @@ from usdt_monitor_bot.handlers import (
     list_wallets_handler,
     other_message_handler,
     remove_wallet_handler,
+    spam_report_handler,
 )
 
 # --- Define constants for testing ---
@@ -339,9 +340,6 @@ async def test_add_wallet_response_shows_normalized_address(
 
 
 # --- /spam handler ---
-
-from usdt_monitor_bot.handlers import spam_report_handler
-from usdt_monitor_bot import messages
 
 
 async def test_spam_report_empty(mock_message: AsyncMock, mock_db_manager: AsyncMock):

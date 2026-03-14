@@ -3,8 +3,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-import pytest
-
 from usdt_monitor_bot.etherscan import _MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.transaction_parser import (
     convert_db_transaction_to_metadata,
