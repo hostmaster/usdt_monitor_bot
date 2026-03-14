@@ -5,10 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 
+from usdt_monitor_bot.etherscan import _MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.spam_detector_models import RiskAnalysis, TransactionMetadata
-
-# Must match _MAX_VALID_BLOCK_NUMBER in etherscan.py
-_MAX_VALID_BLOCK_NUMBER = 10**9
 
 
 def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
