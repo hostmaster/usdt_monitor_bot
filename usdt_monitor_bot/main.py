@@ -83,14 +83,14 @@ async def main() -> None:
         return
 
     # 7. Initialize Bot and Dispatcher
-    bot_session = AiohttpSession(limit=10)
+    bot_session = AiohttpSession(limit=config.bot_session_connection_limit)
     bot = Bot(
         token=config.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
     dp = Dispatcher(db_manager=db_manager)
-    logging.debug("Bot initialized with session limit=10")
+    logging.debug(f"Bot initialized with session limit={config.bot_session_connection_limit}")
 
     # 8. Initialize Services
     etherscan_client = EtherscanClient(config=config)
