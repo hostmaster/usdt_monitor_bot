@@ -160,7 +160,7 @@ def filter_transactions(
 
     # Sort ascending, then take the last N to get the newest, already in chronological order
     filtered.sort(key=lambda x: int(x.get("blockNumber", 0)))
-    return filtered[-max_per_check:] if max_per_check < len(filtered) else filtered
+    return filtered[-max_per_check:] if max_per_check > 0 else []
 
 
 def format_transaction_log(
