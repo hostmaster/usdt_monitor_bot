@@ -979,3 +979,73 @@ async def test_contract_age_blocks_error_cached_as_none(
 
     # Etherscan should only be called once
     mock_etherscan.get_contract_creation_block.assert_awaited_once()
+
+
+# --- _add_notification_sent cache eviction ---
+
+
+def test_add_notification_sent_basic(checker: TransactionChecker):
+    """Key is added to cache after first call."""
+    checker._notification_dedup_max_size = 5
+    checker._add_notification_sent(1, "0xtxhash")
+    assert (1, "0xtxhash") in checker._notification_sent_cache
+
+
+def test_add_notification_sent_duplicate_no_double_add(checker: TransactionChecker):
+    """Adding same key twice does not grow the deque."""
+    checker._notification_dedup_max_size = 5
+    checker._add_notification_sent(1, "0xtxhash")
+    checker._add_notification_sent(1, "0xtxhash")
+    assert len(checker._notification_sent_order) == 1
+
+
+def test_add_notification_sent_evicts_oldest_at_capacity(checker: TransactionChecker):
+    """When cache is full, oldest entry is evicted to make room."""
+    checker._notification_dedup_max_size = 3
+    checker._notification_sent_cache.clear()
+    checker._notification_sent_order.clear()
+
+    for i in range(3):
+        checker._add_notification_sent(i, f"0xtx{i}")
+
+    # Cache is now full; adding a 4th should evict (0, "0xtx0")
+    checker._add_notification_sent(99, "0xtxnew")
+
+    assert (0, "0xtx0") not in checker._notification_sent_cache
+    assert (99, "0xtxnew") in checker._notification_sent_cache
+    assert len(checker._notification_sent_cache) == 3
+
+
+def test_add_notification_sent_disabled_when_max_size_zero(checker: TransactionChecker):
+    """Cache is a no-op when max_size <= 0."""
+    checker._notification_dedup_max_size = 0
+    checker._add_notification_sent(1, "0xtxhash")
+    assert (1, "0xtxhash") not in checker._notification_sent_cache
+
+
+# --- Unknown token early return ---
+
+
+async def test_process_unknown_token_returns_zero(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """_process_single_transaction returns 0 immediately for unknown token symbol."""
+    tx = {
+        "hash": "0xunknown_token_tx",
+        "token_symbol": "DAI",  # not registered in mock_config
+        "blockNumber": "1234",
+        "timeStamp": str(NOW_TS),
+        "from": "0xsender",
+        "to": ADDR1,
+        "value": "1000000",
+    }
+
+    result = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+
+    assert result == 0
+    mock_notifier.send_token_notification.assert_not_awaited()
+    mock_db.store_transaction.assert_not_awaited()
