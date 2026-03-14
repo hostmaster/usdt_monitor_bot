@@ -214,11 +214,12 @@ class DatabaseManager:
         return [row[0] for row in results] if isinstance(results, list) else None
 
     def _remove_wallet_sync(self, user_id: int, address: str) -> bool:
-        return self._execute_db_query(
+        rowcount = self._execute_db_query(
             "DELETE FROM wallets WHERE user_id = ? AND address = ?",
             (user_id, address.lower()),
             commit=True,
         )
+        return rowcount > 0
 
     def _get_distinct_addresses_sync(self) -> Optional[List[str]]:
         results = self._execute_db_query(
