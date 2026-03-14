@@ -15,6 +15,29 @@ from enum import Enum, auto
 from typing import List, Optional
 
 
+# Shared schema constants used by both _init_db_sync and the FK migration so
+# they can never drift out of sync with each other.
+_TRANSACTION_HISTORY_COLUMNS = (
+    "tx_hash, monitored_address, from_address, to_address, value, "
+    "block_number, timestamp, token_symbol, risk_score, created_at"
+)
+_TRANSACTION_HISTORY_DDL = """
+    CREATE TABLE {name} (
+        tx_hash TEXT PRIMARY KEY,
+        monitored_address TEXT NOT NULL,
+        from_address TEXT NOT NULL,
+        to_address TEXT NOT NULL,
+        value REAL NOT NULL,
+        block_number INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        token_symbol TEXT NOT NULL,
+        risk_score INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address) ON DELETE CASCADE
+    )
+"""
+
+
 class WalletAddResult(Enum):
     """Result of wallet addition operation."""
 
@@ -109,35 +132,22 @@ class DatabaseManager:
             conn = sqlite3.connect(
                 self.db_path, timeout=self.timeout, check_same_thread=False
             )
-            # Check whether the table already carries ON DELETE CASCADE
+            # Check whether the table already carries ON DELETE CASCADE (case-insensitive)
             row = conn.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='transaction_history'"
             ).fetchone()
             if row is None:
                 return True  # Table doesn't exist yet; CREATE TABLE will handle it
-            if "ON DELETE CASCADE" in (row[0] or ""):
+            if "on delete cascade" in (row[0] or "").lower():
                 return True  # Already correct, nothing to do
 
             logging.info("Migrating transaction_history FK to ON DELETE CASCADE...")
             conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute("BEGIN")
-            conn.execute("""
-                CREATE TABLE transaction_history_new (
-                    tx_hash TEXT PRIMARY KEY,
-                    monitored_address TEXT NOT NULL,
-                    from_address TEXT NOT NULL,
-                    to_address TEXT NOT NULL,
-                    value REAL NOT NULL,
-                    block_number INTEGER NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    token_symbol TEXT NOT NULL,
-                    risk_score INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address) ON DELETE CASCADE
-                )
-            """)
+            conn.execute(_TRANSACTION_HISTORY_DDL.format(name="transaction_history_new"))
             conn.execute(
-                "INSERT INTO transaction_history_new SELECT * FROM transaction_history"
+                f"INSERT INTO transaction_history_new ({_TRANSACTION_HISTORY_COLUMNS}) "
+                f"SELECT {_TRANSACTION_HISTORY_COLUMNS} FROM transaction_history"
             )
             conn.execute("DROP TABLE transaction_history")
             conn.execute(
@@ -160,15 +170,15 @@ class DatabaseManager:
             if conn:
                 try:
                     conn.execute("ROLLBACK")
-                except Exception:
-                    pass
+                except sqlite3.Error as rollback_err:
+                    logging.warning(f"Rollback failed during FK migration: {rollback_err}")
             return False
         finally:
             if conn:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except sqlite3.Error as close_err:
+                    logging.warning(f"Failed to close DB connection after FK migration: {close_err}")
 
     def _init_db_sync(self) -> bool:
         """
@@ -198,19 +208,7 @@ class DatabaseManager:
                    last_checked_block INTEGER DEFAULT 0,
                    last_check_time TIMESTAMP
                )""",
-            """CREATE TABLE IF NOT EXISTS transaction_history (
-                   tx_hash TEXT PRIMARY KEY,
-                   monitored_address TEXT NOT NULL,
-                   from_address TEXT NOT NULL,
-                   to_address TEXT NOT NULL,
-                   value REAL NOT NULL,
-                   block_number INTEGER NOT NULL,
-                   timestamp TEXT NOT NULL,
-                   token_symbol TEXT NOT NULL,
-                   risk_score INTEGER,
-                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                   FOREIGN KEY(monitored_address) REFERENCES tracked_addresses(address) ON DELETE CASCADE
-               )""",
+            _TRANSACTION_HISTORY_DDL.format(name="IF NOT EXISTS transaction_history"),
             """CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_address
                    ON transaction_history(monitored_address, block_number DESC)""",
             """CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp
