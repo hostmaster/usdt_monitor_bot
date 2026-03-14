@@ -20,44 +20,39 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.14"]
-      fail-fast: false
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.14
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.14"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
-        
+
       - name: Cache uv pip dependencies
         uses: actions/cache@v5
-        id: cache
         with:
           path: |
             ~/.cache/uv
             ${{ env.pythonLocation }}/lib/python*/site-packages
-          key: |
-            ${{ runner.os }}-uv-pip-${{ hashFiles('pyproject.toml') }}
-            ${{ runner.os }}-uv-pip-${{ matrix.python-version }}
+          key: ${{ runner.os }}-uv-pip-3.14-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
-            ${{ runner.os }}-uv-pip-${{ matrix.python-version }}
-            
+            ${{ runner.os }}-uv-pip-3.14-
+
       - name: Install dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           uv pip install --system -e ".[test]"
 
-      - name: Run tests in parallel
+      - name: Run tests
         run: |
           python -m pytest tests/ --tb=short --junitxml=test-results.xml
 
@@ -65,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: test-results-python${{ matrix.python-version }}
+          name: test-results
           path: |
             test-results.xml
             .pytest_cache/

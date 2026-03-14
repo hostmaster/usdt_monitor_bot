@@ -1,7 +1,10 @@
 ---
-name: Pylint
+name: Lint
 
 on:
+  pull_request:
+    paths:
+      - "**.py"
   push:
     paths:
       - "**.py"
@@ -10,6 +13,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   lint:
