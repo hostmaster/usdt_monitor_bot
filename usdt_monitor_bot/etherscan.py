@@ -26,6 +26,12 @@ from tenacity import (
 from usdt_monitor_bot.config import BotConfig
 
 
+# Sanity cap for block numbers returned by the API.
+# Ethereum has ~22M blocks as of 2025; 10^9 gives ample headroom while
+# rejecting obviously bogus values that could corrupt checkpoint state.
+_MAX_VALID_BLOCK_NUMBER = 10**9
+
+
 class EtherscanError(Exception):
     """Base class for Etherscan API errors."""
 
@@ -390,14 +396,12 @@ class EtherscanClient:
                     error_details = f"API error: {message}"
                     if message == "NOTOK":
                         # NOTOK can mean query timeout, invalid params, or other issues
-                        # Include additional context from result if available
+                        # Include result string if available; omit internal addresses/blocks
                         if result and isinstance(result, str):
                             error_details = f"API error: {message} - {result}"
                         else:
                             error_details = (
-                                f"API error: {message} (possible query timeout or invalid parameters). "
-                                f"Contract: {contract_address[:10]}..., Address: {address[:10]}..., "
-                                f"Start block: {start_block}"
+                                f"API error: {message} (possible query timeout or invalid parameters)"
                             )
 
                     # For other API-level errors (e.g., "Invalid API Key"), raise a generic EtherscanError.
@@ -474,7 +478,11 @@ class EtherscanClient:
 
                 if block_number:
                     try:
-                        return int(block_number)
+                        parsed = int(block_number)
+                        if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
+                            logging.warning(f"Contract creation block out of range: {parsed}")
+                            return None
+                        return parsed
                     except (ValueError, TypeError):
                         logging.debug(f"Invalid block number: {block_number}")
                         return None
@@ -565,6 +573,9 @@ class EtherscanClient:
 
                     try:
                         block_number = int(result, 16)
+                        if not (0 < block_number <= _MAX_VALID_BLOCK_NUMBER):
+                            logging.warning(f"Latest block out of range: {block_number}")
+                            return None
                         logging.debug(f"Latest block: {block_number}")
                         return block_number
                     except (ValueError, TypeError) as e:

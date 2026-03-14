@@ -248,19 +248,14 @@ async def test_get_token_transactions_notok_error(
     with pytest.raises(EtherscanError) as exc_info:
         await client.get_token_transactions(contract_address, address, start_block)
 
-    # Verify the error message includes context
+    # Verify the error message contains the status but not internal addresses/block numbers
     error_msg = str(exc_info.value)
     assert "NOTOK" in error_msg
-    assert (
-        "Contract:" in error_msg
-        or "query timeout" in error_msg.lower()
-        or "invalid parameters" in error_msg.lower()
-    )
-    assert (
-        contract_address[:10] in error_msg
-        or address[:10] in error_msg
-        or str(start_block) in error_msg
-    )
+    assert "query timeout" in error_msg.lower() or "invalid parameters" in error_msg.lower()
+    # Internal details must not be leaked into error messages
+    assert contract_address[:10] not in error_msg
+    assert address[:10] not in error_msg
+    assert str(start_block) not in error_msg
 
     assert mock_session_get.call_count == 1
 

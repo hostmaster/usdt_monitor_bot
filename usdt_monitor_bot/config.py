@@ -20,13 +20,18 @@ from usdt_monitor_bot.token_config import TokenConfig, TokenRegistry
 # Required environment variables
 REQUIRED_ENV_VARS = ("TELEGRAM_BOT_TOKEN", "ETHERSCAN_API_KEY")
 
-# Define a data directory inside the container's working directory
-DATA_DIR = "/app/data" if os.path.exists("/app") else "data"
-# Ensure the data directory exists
+# Define a data directory: prefer /app/data in containers, then XDG data home,
+# then a temp directory as last resort (e.g. in tests).
+if os.path.exists("/app"):
+    DATA_DIR = "/app/data"
+else:
+    DATA_DIR = os.path.join(
+        os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+        "usdt_monitor_bot",
+    )
 try:
     os.makedirs(DATA_DIR, exist_ok=True)
 except OSError:
-    # If we can't create the directory (e.g., in tests), use a temporary directory
     import tempfile
 
     DATA_DIR = tempfile.mkdtemp()
@@ -55,6 +60,7 @@ class BotConfig:
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
         notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
         spam_detector_config: Optional[dict] = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
+        bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -97,6 +103,9 @@ class BotConfig:
 
         # Spam detector threshold overrides (None = use SpamDetector defaults)
         self.spam_detector_config: Optional[dict] = spam_detector_config if spam_detector_config else None
+
+        # Bot session connection limit
+        self.bot_session_connection_limit = bot_session_connection_limit
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -217,6 +226,9 @@ def load_config() -> BotConfig:
         "NOTIFICATION_DEDUP_CACHE_SIZE", 10_000
     )
 
+    # Bot session connection limit
+    bot_session_connection_limit = _get_env_int("BOT_SESSION_CONNECTION_LIMIT", 10)
+
     # Spam detection debugging option
     spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
     spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
@@ -283,6 +295,7 @@ def load_config() -> BotConfig:
         spam_detection_debug=spam_detection_debug,
         notification_dedup_cache_size=notification_dedup_cache_size,
         spam_detector_config=spam_detector_config if spam_detector_config else None,
+        bot_session_connection_limit=bot_session_connection_limit,
     )
 
     # Token configuration overrides
