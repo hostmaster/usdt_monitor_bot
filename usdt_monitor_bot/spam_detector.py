@@ -430,27 +430,14 @@ class SpamDetector:
         # ========== FILTER 7: Rapid Address Cycling ==========
         if historical_transactions:
             unique_senders = self._detect_rapid_cycling(tx, historical_transactions)
+            score += self._apply_filter(
+                bool(unique_senders),
+                RiskFlag.RAPID_ADDRESS_CYCLING, "rapid_cycling_weight", "RAPID_CYCLING",
+                flags, score_breakdown, tx.tx_hash, tx.from_address, "RAPID_ADDRESS_CYCLING",
+                f"unique_senders={unique_senders}" if unique_senders else "",
+            )
             if unique_senders:
-                score += self.config["rapid_cycling_weight"]
-                flags.add(RiskFlag.RAPID_ADDRESS_CYCLING)
-                score_breakdown["RAPID_CYCLING"] = self.config["rapid_cycling_weight"]
                 details["rapid_cycling_senders"] = unique_senders
-                SpamDebuggingLogger.log_filter_evaluation(
-                    tx.tx_hash,
-                    tx.from_address,
-                    "RAPID_ADDRESS_CYCLING",
-                    True,
-                    self.config["rapid_cycling_weight"],
-                    f"unique_senders={unique_senders}",
-                )
-            else:
-                SpamDebuggingLogger.log_filter_evaluation(
-                    tx.tx_hash,
-                    tx.from_address,
-                    "RAPID_ADDRESS_CYCLING",
-                    False,
-                    0,
-                )
 
         # Cap score at 100
         score = min(100, score)
