@@ -87,8 +87,8 @@ class BlockscoutClient:
                 if self._connector:
                     try:
                         await self._connector.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug(f"BlockscoutClient old connector close error: {e}")
                     self._connector = None
                 self._session = self._create_session()
 
