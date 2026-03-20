@@ -62,6 +62,12 @@ class BotConfig:
         contract_creation_cache_size: int = 1_000,  # Max contract addresses to cache creation blocks for
         spam_detector_config: Optional[dict] = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
         bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
+        blockscout_base_url: str = "https://eth.blockscout.com/api",
+        blockscout_enabled: bool = True,
+        blockscout_api_key: Optional[str] = None,
+        moralis_api_key: Optional[str] = None,
+        fallback_failure_threshold: int = 3,
+        fallback_cooldown_seconds: float = 300.0,
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -110,6 +116,14 @@ class BotConfig:
 
         # Bot session connection limit
         self.bot_session_connection_limit = bot_session_connection_limit
+
+        # Fallback provider settings
+        self.blockscout_base_url = blockscout_base_url
+        self.blockscout_enabled = blockscout_enabled
+        self.blockscout_api_key = blockscout_api_key
+        self.moralis_api_key = moralis_api_key
+        self.fallback_failure_threshold = fallback_failure_threshold
+        self.fallback_cooldown_seconds = fallback_cooldown_seconds
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -236,6 +250,17 @@ def load_config() -> BotConfig:
     # Bot session connection limit
     bot_session_connection_limit = _get_env_int("BOT_SESSION_CONNECTION_LIMIT", 10)
 
+    # Fallback provider settings
+    blockscout_base_url = os.getenv(
+        "BLOCKSCOUT_BASE_URL", "https://eth.blockscout.com/api"
+    )
+    blockscout_enabled_env = os.getenv("BLOCKSCOUT_ENABLED", "true").lower()
+    blockscout_enabled = blockscout_enabled_env not in ("false", "0", "no", "off")
+    blockscout_api_key: Optional[str] = os.getenv("BLOCKSCOUT_API_KEY") or None
+    moralis_api_key: Optional[str] = os.getenv("MORALIS_API_KEY") or None
+    fallback_failure_threshold = _get_env_int("FALLBACK_FAILURE_THRESHOLD", 3)
+    fallback_cooldown_seconds = _get_env_float("FALLBACK_COOLDOWN_SECONDS", 300.0)
+
     # Spam detection debugging option
     spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
     spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
@@ -304,6 +329,12 @@ def load_config() -> BotConfig:
         contract_creation_cache_size=contract_creation_cache_size,
         spam_detector_config=spam_detector_config or None,
         bot_session_connection_limit=bot_session_connection_limit,
+        blockscout_base_url=blockscout_base_url,
+        blockscout_enabled=blockscout_enabled,
+        blockscout_api_key=blockscout_api_key,
+        moralis_api_key=moralis_api_key,
+        fallback_failure_threshold=fallback_failure_threshold,
+        fallback_cooldown_seconds=fallback_cooldown_seconds,
     )
 
     # Token configuration overrides

@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Literal, Optional
 
-from usdt_monitor_bot.etherscan import EtherscanClient
+from usdt_monitor_bot.blockchain_provider import BlockchainProvider
 
 
 @dataclass
@@ -21,7 +21,7 @@ class BlockDeterminationResult:
 class BlockTracker:
     """Manages block number advancement and capping for a monitored address."""
 
-    def __init__(self, etherscan_client: EtherscanClient) -> None:
+    def __init__(self, etherscan_client: BlockchainProvider) -> None:
         self._etherscan = etherscan_client
 
     async def determine_next_block(

@@ -17,10 +17,10 @@ import aiohttp
 
 # Local
 from usdt_monitor_bot.block_tracker import BlockDeterminationResult, BlockTracker
+from usdt_monitor_bot.blockchain_provider import BlockchainProvider
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
-    EtherscanClient,
     EtherscanError,
     EtherscanRateLimitError,
 )
@@ -45,7 +45,7 @@ class TransactionChecker:
         self,
         config: BotConfig,
         db_manager: DatabaseManager,
-        etherscan_client: EtherscanClient,
+        etherscan_client: BlockchainProvider,
         notifier: NotificationService,
         spam_detector: Optional[SpamDetector] = None,
     ):

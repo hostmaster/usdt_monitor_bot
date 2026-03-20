@@ -14,12 +14,18 @@ This guide provides detailed instructions for deploying the USDT Monitor Bot usi
 
 ```sh
 # .env
-# Replace with your actual tokens
-BOT_TOKEN=your_telegram_bot_token_here
+# Required
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 ETHERSCAN_API_KEY=your_etherscan_api_key_here
+
+# Optional: Blockscout fallback (enabled by default, no key required)
+# BLOCKSCOUT_API_KEY=your_blockscout_api_key_here
+
+# Optional: Moralis fallback (disabled unless key is set)
+# MORALIS_API_KEY=your_moralis_api_key_here
 ```
 
-Replace the placeholder values with your actual API keys.
+Replace the placeholder values with your actual API keys. Blockscout is used as a fallback automatically if Etherscan is unavailable. Moralis is only enabled when `MORALIS_API_KEY` is set.
 
 ## Docker Deployment
 
@@ -114,7 +120,13 @@ Then restart the container. A new database will be created automatically.
 
 ### API Rate Limits
 
-The Etherscan API has rate limits. If you're monitoring many addresses, you might hit these limits. The bot includes a delay between API calls to avoid this, but you may need to adjust the `ETHERSCAN_REQUEST_DELAY` variable in the code if you're still experiencing issues.
+The bot uses Etherscan as its primary data source. If Etherscan is rate-limited or unavailable, it automatically fails over to Blockscout (enabled by default) and then Moralis (if `MORALIS_API_KEY` is set). A circuit breaker prevents repeated calls to a failing provider; it reopens after 300 seconds by default (`FALLBACK_COOLDOWN_SECONDS`).
+
+If you are consistently hitting Etherscan rate limits, consider:
+- Increasing `ETHERSCAN_REQUEST_DELAY` (default `0.5s`)
+- Upgrading your Etherscan plan
+- Setting `BLOCKSCOUT_API_KEY` for higher Blockscout rate limits
+- Setting `MORALIS_API_KEY` to add Moralis as an additional fallback
 
 ### Container Logs
 
