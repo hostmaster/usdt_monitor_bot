@@ -58,8 +58,10 @@ class TransactionChecker:
             spam_detector if spam_detector is not None else SpamDetector()
         )
         self._spam_detection_enabled = True  # Enable by default
-        # Cache for contract creation blocks to avoid repeated API calls
+        # Cache for contract creation blocks to avoid repeated API calls.
+        # Bounded to prevent unbounded growth in long-running bots.
         self._contract_creation_cache: dict[str, Optional[int]] = {}
+        self._contract_creation_cache_max_size = 1000
         # Bounded in-memory cache of (user_id, tx_hash) to suppress duplicate notifications
         self._notification_sent_cache: set[tuple[int, str]] = set()
         self._notification_sent_order: deque[tuple[int, str]] = deque()
@@ -221,13 +223,17 @@ class TransactionChecker:
             creation_block = await self._etherscan.get_contract_creation_block(
                 address_lower
             )
-            # Cache the result (even if None)
+            # Cache the result (even if None); evict oldest entry when at capacity
+            if len(self._contract_creation_cache) >= self._contract_creation_cache_max_size:
+                self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
             self._contract_creation_cache[address_lower] = creation_block
 
             if creation_block is not None:
                 return max(0, current_block - creation_block)
         except Exception as e:
             logging.debug(f"Contract age lookup failed for {address_lower[:8]}: {e}")
+            if len(self._contract_creation_cache) >= self._contract_creation_cache_max_size:
+                self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
             self._contract_creation_cache[address_lower] = None
 
         return 0  # Default to 0 if unable to determine
