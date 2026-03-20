@@ -13,6 +13,7 @@ from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.etherscan import AdaptiveRateLimiter
 
 _MAX_VALID_BLOCK_NUMBER = 10**9
+_FAR_FUTURE_BLOCK = 99999999
 
 
 class BlockscoutError(ProviderError):
@@ -104,7 +105,7 @@ class BlockscoutClient:
             "address": address,
             "contractaddress": contract_address,
             "startblock": start_block,
-            "endblock": 99999999,
+            "endblock": _FAR_FUTURE_BLOCK,
             "sort": "asc",
         }
         session = self._session

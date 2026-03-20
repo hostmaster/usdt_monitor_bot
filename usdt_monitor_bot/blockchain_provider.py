@@ -107,6 +107,10 @@ class WithFallback:
         for provider, breaker in zip(self._providers, self._breakers):
             if not breaker.is_available():
                 continue
+            if breaker.is_recovering():
+                logging.info(
+                    f"Provider {type(provider).__name__} attempting recovery..."
+                )
             try:
                 result = await getattr(provider, method_name)(*args, **kwargs)
                 breaker.record_success()
@@ -124,7 +128,9 @@ class WithFallback:
                 last_exc = e
         if last_exc is not None:
             raise last_exc
-        raise RuntimeError("All providers unavailable (all circuit breakers open)")
+        raise RuntimeError(
+            f"All providers unavailable (all circuit breakers open): {last_exc}"
+        )
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
