@@ -131,10 +131,6 @@ class BlockscoutClient:
                     raise BlockscoutError(f"API error: {message}")
                 self._rate_limiter.on_success()
                 return [_normalize_tx(tx) for tx in data.get("result", [])]
-        except BlockscoutError:
-            raise
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            raise
         except ValueError as e:
             raise BlockscoutError(f"Invalid JSON response: {e}") from e
 
@@ -164,8 +160,6 @@ class BlockscoutClient:
                     return None
                 self._rate_limiter.on_success()
                 return block_number
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            raise
         except (ValueError, TypeError):
             return None
 
@@ -197,8 +191,6 @@ class BlockscoutClient:
                     return None
                 self._rate_limiter.on_success()
                 return parsed
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            raise
         except (ValueError, TypeError, KeyError):
             return None
 

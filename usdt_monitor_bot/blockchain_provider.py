@@ -128,9 +128,7 @@ class WithFallback:
                 last_exc = e
         if last_exc is not None:
             raise last_exc
-        raise RuntimeError(
-            f"All providers unavailable (all circuit breakers open): {last_exc}"
-        )
+        raise RuntimeError("All providers unavailable (all circuit breakers open)")
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0

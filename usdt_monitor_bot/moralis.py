@@ -128,10 +128,6 @@ class MoralisClient:
                     )
                 data = await response.json(content_type=None)
                 return [_normalize_tx(tx) for tx in data.get("result", [])]
-        except MoralisError:
-            raise
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            raise
         except ValueError as e:
             raise MoralisError(f"Invalid JSON response: {e}") from e
 
