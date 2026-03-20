@@ -15,6 +15,11 @@ from usdt_monitor_bot.etherscan import (
 )
 from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import SpamDetector
+from usdt_monitor_bot.transaction_parser import (
+    convert_to_transaction_metadata,
+    filter_transactions,
+    parse_timestamp,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -438,7 +443,7 @@ async def test_determine_next_block_database_ahead_of_blockchain(
 
     mock_etherscan.get_latest_block_number.return_value = latest_block
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
     )
 
@@ -460,7 +465,7 @@ async def test_determine_next_block_transaction_ahead_of_blockchain(
 
     mock_etherscan.get_latest_block_number.return_value = latest_block
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
     )
 
@@ -485,7 +490,7 @@ async def test_determine_next_block_both_ahead_of_blockchain(
 
     mock_etherscan.get_latest_block_number.return_value = latest_block
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
     )
 
@@ -508,7 +513,7 @@ async def test_determine_next_block_normal_case_no_reset(
 
     mock_etherscan.get_latest_block_number.return_value = latest_block
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
     )
 
@@ -530,7 +535,7 @@ async def test_determine_next_block_no_transactions_advances_to_latest(
 
     mock_etherscan.get_latest_block_number.return_value = latest_block
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
     )
 
@@ -551,7 +556,7 @@ async def test_determine_next_block_latest_block_none_guard_clause(
 
     mock_etherscan.get_latest_block_number.return_value = None
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
     )
 
@@ -573,7 +578,7 @@ async def test_determine_next_block_latest_block_none_with_transactions(
 
     mock_etherscan.get_latest_block_number.return_value = None
 
-    result = await checker._determine_next_block(
+    result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
     )
 
@@ -669,17 +674,17 @@ async def test_convert_to_transaction_metadata_missing_fields(
     with caplog.at_level(logging.WARNING):
         # Missing hash
         tx_no_hash = {"from": "0xsender", "to": "0xrecipient", "value": "1000000"}
-        result = checker._convert_to_transaction_metadata(tx_no_hash, 6)
+        result = convert_to_transaction_metadata(tx_no_hash, 6)
         assert result is None
 
         # Missing from address
         tx_no_from = {"hash": "0x123", "to": "0xrecipient", "value": "1000000"}
-        result = checker._convert_to_transaction_metadata(tx_no_from, 6)
+        result = convert_to_transaction_metadata(tx_no_from, 6)
         assert result is None
 
         # Missing to address
         tx_no_to = {"hash": "0x123", "from": "0xsender", "value": "1000000"}
-        result = checker._convert_to_transaction_metadata(tx_no_to, 6)
+        result = convert_to_transaction_metadata(tx_no_to, 6)
         assert result is None
 
 
@@ -696,7 +701,7 @@ async def test_convert_to_transaction_metadata_invalid_timestamp(
             "timeStamp": "not-a-timestamp",
             "blockNumber": "1000",
         }
-        result = checker._convert_to_transaction_metadata(tx, 6)
+        result = convert_to_transaction_metadata(tx, 6)
         assert result is None
         assert "Invalid timestamp" in caplog.text
 
@@ -714,7 +719,7 @@ async def test_convert_to_transaction_metadata_invalid_value(
             "timeStamp": str(NOW_TS),
             "blockNumber": "1000",
         }
-        result = checker._convert_to_transaction_metadata(tx, 6)
+        result = convert_to_transaction_metadata(tx, 6)
         assert result is None
         # The error is caught by the outer exception handler
         assert "Invalid value" in caplog.text or "Metadata conversion error" in caplog.text
@@ -723,27 +728,27 @@ async def test_convert_to_transaction_metadata_invalid_value(
 # --- Tests for Timestamp Parsing ---
 
 
-async def test_parse_timestamp_iso_format(checker: TransactionChecker):
+async def test_parse_timestamp_iso_format():
     """Test parsing ISO format timestamps."""
-    result = checker._parse_timestamp("2025-01-27T12:00:00+00:00")
+    result = parse_timestamp("2025-01-27T12:00:00+00:00")
     assert result is not None
     assert result.year == 2025
     assert result.month == 1
     assert result.day == 27
 
 
-async def test_parse_timestamp_unix_format(checker: TransactionChecker):
+async def test_parse_timestamp_unix_format():
     """Test parsing Unix timestamp strings."""
-    result = checker._parse_timestamp("1620000000")
+    result = parse_timestamp("1620000000")
     assert result is not None
     # May 3, 2021
     assert result.year == 2021
 
 
-async def test_parse_timestamp_invalid_format(checker: TransactionChecker, caplog):
+async def test_parse_timestamp_invalid_format(caplog):
     """Test that invalid timestamp formats return None."""
     with caplog.at_level(logging.DEBUG):
-        result = checker._parse_timestamp("invalid-timestamp")
+        result = parse_timestamp("invalid-timestamp")
         assert result is None
         assert "Invalid DB timestamp" in caplog.text
 
@@ -751,9 +756,7 @@ async def test_parse_timestamp_invalid_format(checker: TransactionChecker, caplo
 # --- Tests for Filter Transactions ---
 
 
-async def test_filter_transactions_sorts_by_block_chronologically(
-    checker: TransactionChecker,
-):
+async def test_filter_transactions_sorts_by_block_chronologically():
     """Test that filtered transactions are sorted chronologically (oldest first)."""
     transactions = [
         create_mock_tx(1003, "s", "r", USDT_CONTRACT),
@@ -761,7 +764,7 @@ async def test_filter_transactions_sorts_by_block_chronologically(
         create_mock_tx(1002, "s", "r", USDT_CONTRACT),
     ]
 
-    result = checker._filter_transactions(transactions, 1000)
+    result = filter_transactions(transactions, 1000, 7, 10)
 
     assert len(result) == 3
     # Should be sorted chronologically (oldest first for processing)
@@ -770,9 +773,7 @@ async def test_filter_transactions_sorts_by_block_chronologically(
     assert int(result[2]["blockNumber"]) == 1003
 
 
-async def test_filter_transactions_excludes_at_or_below_start_block(
-    checker: TransactionChecker,
-):
+async def test_filter_transactions_excludes_at_or_below_start_block():
     """Test that transactions at or below start_block are excluded."""
     transactions = [
         create_mock_tx(999, "s", "r", USDT_CONTRACT),  # Below
@@ -780,7 +781,7 @@ async def test_filter_transactions_excludes_at_or_below_start_block(
         create_mock_tx(1001, "s", "r", USDT_CONTRACT),  # Above
     ]
 
-    result = checker._filter_transactions(transactions, 1000)
+    result = filter_transactions(transactions, 1000, 7, 10)
 
     assert len(result) == 1
     assert int(result[0]["blockNumber"]) == 1001
