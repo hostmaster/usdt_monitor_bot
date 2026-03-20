@@ -38,4 +38,4 @@ jobs:
           bandit --baseline baseline.json -r usdt_monitor_bot/
       - name: Check dependencies for known vulnerabilities
         run: |
-          safety scan
+          pip-audit
