@@ -59,6 +59,7 @@ class BotConfig:
         verbose_logging: bool = False,  # Enable DEBUG level logging
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
         notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
+        contract_creation_cache_size: int = 1_000,  # Max contract addresses to cache creation blocks for
         spam_detector_config: Optional[dict] = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
         bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
     ):
@@ -100,6 +101,9 @@ class BotConfig:
 
         # Notification deduplication (in-memory cache cap)
         self.notification_dedup_cache_size = notification_dedup_cache_size
+
+        # Contract creation block cache cap
+        self.contract_creation_cache_size = contract_creation_cache_size
 
         # Spam detector threshold overrides (None = use SpamDetector defaults)
         self.spam_detector_config: Optional[dict] = spam_detector_config if spam_detector_config else None
@@ -226,6 +230,9 @@ def load_config() -> BotConfig:
         "NOTIFICATION_DEDUP_CACHE_SIZE", 10_000
     )
 
+    # Contract creation block cache size (in-memory)
+    contract_creation_cache_size = _get_env_int("CONTRACT_CREATION_CACHE_SIZE", 1_000)
+
     # Bot session connection limit
     bot_session_connection_limit = _get_env_int("BOT_SESSION_CONNECTION_LIMIT", 10)
 
@@ -294,6 +301,7 @@ def load_config() -> BotConfig:
         verbose_logging=verbose_logging,
         spam_detection_debug=spam_detection_debug,
         notification_dedup_cache_size=notification_dedup_cache_size,
+        contract_creation_cache_size=contract_creation_cache_size,
         spam_detector_config=spam_detector_config or None,
         bot_session_connection_limit=bot_session_connection_limit,
     )
