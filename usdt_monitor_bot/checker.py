@@ -644,6 +644,16 @@ class TransactionChecker:
                 # Final defensive check: ensure we never update database with a value ahead of blockchain
                 # Fetch latest_block one more time right before update to catch any race conditions
                 final_latest_block = await self._etherscan.get_latest_block_number()
+                if final_latest_block is None:
+                    final_uncapped_block = (
+                        max(block_result.final_block_number, max_block_in_processed_batch)
+                        if max_block_in_processed_batch > 0
+                        else block_result.final_block_number
+                    )
+                    logging.warning(
+                        f"Defensive block cap skipped for {address_lower[:8]}...: "
+                        f"could not fetch latest block, persisting uncapped {final_uncapped_block}"
+                    )
                 final_block_to_update = self._block_tracker.cap_block_to_latest(
                     block_result.final_block_number,
                     final_latest_block,
