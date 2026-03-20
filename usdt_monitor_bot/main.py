@@ -19,11 +19,14 @@ from aiogram.enums import ParseMode
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Local
+from usdt_monitor_bot.blockchain_provider import WithFallback
+from usdt_monitor_bot.blockscout import BlockscoutClient
 from usdt_monitor_bot.checker import TransactionChecker
 from usdt_monitor_bot.config import load_config
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
+from usdt_monitor_bot.moralis import MoralisClient
 from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import SpamDetector, enable_spam_detector_debugging
 
@@ -94,6 +97,17 @@ async def main() -> None:
 
     # 8. Initialize Services
     etherscan_client = EtherscanClient(config=config)
+    fallbacks = []
+    if config.blockscout_enabled:
+        fallbacks.append(BlockscoutClient(config=config))
+    if config.moralis_api_key:
+        fallbacks.append(MoralisClient(config=config))
+    blockchain_client = WithFallback(
+        primary=etherscan_client,
+        fallbacks=fallbacks,
+        failure_threshold=config.fallback_failure_threshold,
+        cooldown_seconds=config.fallback_cooldown_seconds,
+    )
     notifier = NotificationService(bot=bot, config=config)
     spam_detector = SpamDetector(
         config=config.spam_detector_config,
@@ -102,7 +116,7 @@ async def main() -> None:
     transaction_checker = TransactionChecker(
         config=config,
         db_manager=db_manager,
-        etherscan_client=etherscan_client,
+        etherscan_client=blockchain_client,
         notifier=notifier,
         spam_detector=spam_detector,
     )
@@ -161,7 +175,7 @@ async def main() -> None:
     finally:
         logging.info("Shutting down...")
         scheduler.shutdown(wait=True)
-        await etherscan_client.close()
+        await blockchain_client.close()
         await bot.session.close()
         logging.debug("Cleanup complete")
 
