@@ -319,6 +319,15 @@ class TransactionChecker:
         self._notification_sent_cache.add(key)
         self._notification_sent_order.append(key)
 
+    def _remove_notification_sent(self, user_id: int, tx_hash: str) -> None:
+        """Roll back a dedup cache entry — used when a notification send fails."""
+        key = (user_id, tx_hash)
+        self._notification_sent_cache.discard(key)
+        try:
+            self._notification_sent_order.remove(key)
+        except ValueError:
+            pass
+
     async def _process_single_transaction(
         self,
         tx: dict,
@@ -392,17 +401,21 @@ class TransactionChecker:
             return 0
 
         # Send notifications for legitimate transactions only (skip if already sent recently when cache enabled)
-        # Register in dedup cache BEFORE the await to close the window between check and send.
+        # Register in dedup cache BEFORE the await to close the window between check and send;
+        # roll back on failure so the next cycle can retry.
         sent_count = 0
         for user_id in user_ids:
             if self._notification_dedup_max_size > 0 and (user_id, tx_hash) in self._notification_sent_cache:
                 logging.debug(f"Skip duplicate notify user={user_id} tx={tx_hash[:16]}...")
                 continue
             self._add_notification_sent(user_id, tx_hash)
-            await self._notifier.send_token_notification(
-                user_id, tx, tx_token_symbol, address_lower, risk_analysis
-            )
-            sent_count += 1
+            try:
+                await self._notifier.send_token_notification(
+                    user_id, tx, tx_token_symbol, address_lower, risk_analysis
+                )
+                sent_count += 1
+            except Exception:
+                self._remove_notification_sent(user_id, tx_hash)
         return sent_count
 
     async def _send_notifications_for_batch(

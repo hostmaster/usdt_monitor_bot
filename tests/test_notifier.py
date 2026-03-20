@@ -421,15 +421,16 @@ async def test_send_token_notification_invalid_user_id(
 async def test_send_token_notification_telegram_api_error(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
-    """Test handling of Telegram API errors during message sending."""
+    """Test that Telegram API errors are logged and re-raised for caller to handle."""
     mock_telegram_bot.send_message.side_effect = TelegramAPIError(
         method=MagicMock(), message="Chat not found"
     )
 
     with caplog.at_level(logging.ERROR):
-        await notifier.send_token_notification(
-            USER1, TX1_INCOMING_USDT, "USDT", ADDR1
-        )
+        with pytest.raises(TelegramAPIError):
+            await notifier.send_token_notification(
+                USER1, TX1_INCOMING_USDT, "USDT", ADDR1
+            )
 
     assert "Send failed" in caplog.text
 

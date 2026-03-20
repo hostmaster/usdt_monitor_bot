@@ -174,6 +174,7 @@ class NotificationService:
             logging.debug("Empty tx data, skip notification")
             return
 
+        _send_failed = False
         try:
             # Validate user_id
             if not isinstance(user_id, int) or user_id <= 0:
@@ -230,11 +231,15 @@ class NotificationService:
                     logging.info(f"Notify user={user_id} tx={tx.get('hash', 'N/A')[:16]}...")
                 except Exception as e:
                     logging.error(f"Send failed user={user_id}: {e}")
+                    _send_failed = True
+                    raise
             else:
                 logging.debug(f"Format failed, skip notify for tx={tx.get('hash', 'N/A')[:16]}")
 
         except Exception as e:
             logging.error(f"Notify error user={user_id}: {e}", exc_info=True)
+            if _send_failed:
+                raise
 
 
 def format_token_amount(value: float, decimals: int = 6) -> Optional[str]:
