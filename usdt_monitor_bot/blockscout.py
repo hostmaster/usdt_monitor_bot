@@ -61,6 +61,7 @@ class BlockscoutClient:
 
     def __init__(self, config: BotConfig) -> None:
         self._base_url = config.blockscout_base_url
+        self._api_key: Optional[str] = config.blockscout_api_key or None
         self._timeout = ClientTimeout(total=30)
         self._session: Optional[aiohttp.ClientSession] = None
         self._connector: Optional[TCPConnector] = None
@@ -108,6 +109,8 @@ class BlockscoutClient:
             "endblock": _FAR_FUTURE_BLOCK,
             "sort": "asc",
         }
+        if self._api_key:
+            params["apikey"] = self._api_key
         session = self._session
         if session is None:
             raise RuntimeError("HTTP session not initialized")
@@ -139,7 +142,9 @@ class BlockscoutClient:
         await self._ensure_session()
         await self._rate_limiter.wait()
 
-        params = {"module": "proxy", "action": "eth_blockNumber"}
+        params: dict = {"module": "proxy", "action": "eth_blockNumber"}
+        if self._api_key:
+            params["apikey"] = self._api_key
         session = self._session
         if session is None:
             raise RuntimeError("HTTP session not initialized")
@@ -172,12 +177,15 @@ class BlockscoutClient:
 
         # Blockscout REST v2 endpoint: GET /api/v2/addresses/{address}
         url = f"{self._base_url}/v2/addresses/{contract_address}"
+        v2_params: dict = {}
+        if self._api_key:
+            v2_params["apikey"] = self._api_key
         session = self._session
         if session is None:
             raise RuntimeError("HTTP session not initialized")
 
         try:
-            async with session.get(url) as response:
+            async with session.get(url, params=v2_params or None) as response:
                 if response.status != 200:
                     return None
                 data = await response.json(content_type=None)

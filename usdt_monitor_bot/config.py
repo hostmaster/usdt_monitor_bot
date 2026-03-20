@@ -64,6 +64,7 @@ class BotConfig:
         bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
         blockscout_base_url: str = "https://eth.blockscout.com/api",
         blockscout_enabled: bool = True,
+        blockscout_api_key: Optional[str] = None,
         moralis_api_key: Optional[str] = None,
         fallback_failure_threshold: int = 3,
         fallback_cooldown_seconds: float = 300.0,
@@ -119,6 +120,7 @@ class BotConfig:
         # Fallback provider settings
         self.blockscout_base_url = blockscout_base_url
         self.blockscout_enabled = blockscout_enabled
+        self.blockscout_api_key = blockscout_api_key
         self.moralis_api_key = moralis_api_key
         self.fallback_failure_threshold = fallback_failure_threshold
         self.fallback_cooldown_seconds = fallback_cooldown_seconds
@@ -254,6 +256,7 @@ def load_config() -> BotConfig:
     )
     blockscout_enabled_env = os.getenv("BLOCKSCOUT_ENABLED", "true").lower()
     blockscout_enabled = blockscout_enabled_env not in ("false", "0", "no", "off")
+    blockscout_api_key: Optional[str] = os.getenv("BLOCKSCOUT_API_KEY") or None
     moralis_api_key: Optional[str] = os.getenv("MORALIS_API_KEY") or None
     fallback_failure_threshold = _get_env_int("FALLBACK_FAILURE_THRESHOLD", 3)
     fallback_cooldown_seconds = _get_env_float("FALLBACK_COOLDOWN_SECONDS", 300.0)
@@ -328,6 +331,7 @@ def load_config() -> BotConfig:
         bot_session_connection_limit=bot_session_connection_limit,
         blockscout_base_url=blockscout_base_url,
         blockscout_enabled=blockscout_enabled,
+        blockscout_api_key=blockscout_api_key,
         moralis_api_key=moralis_api_key,
         fallback_failure_threshold=fallback_failure_threshold,
         fallback_cooldown_seconds=fallback_cooldown_seconds,

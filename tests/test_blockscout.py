@@ -15,6 +15,7 @@ ADDRESS = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 def mock_config():
     config = MagicMock()
     config.blockscout_base_url = "https://eth.blockscout.com/api"
+    config.blockscout_api_key = None
     return config
 
 
@@ -208,6 +209,57 @@ async def test_get_contract_creation_block_non_200(mock_config):
 
     result = await client.get_contract_creation_block(CONTRACT)
     assert result is None
+
+
+# --- API key handling ---
+
+
+async def test_api_key_included_in_token_tx_params(mock_config):
+    mock_config.blockscout_api_key = "mykey123"
+    mock_session = _make_session({"status": "1", "message": "OK", "result": []})
+    client = BlockscoutClient(mock_config)
+    client._session = mock_session
+
+    await client.get_token_transactions(CONTRACT, ADDRESS)
+
+    call_kwargs = mock_session.get.call_args[1]
+    assert call_kwargs["params"]["apikey"] == "mykey123"
+
+
+async def test_api_key_excluded_when_not_set(mock_config):
+    mock_config.blockscout_api_key = None
+    mock_session = _make_session({"status": "1", "message": "OK", "result": []})
+    client = BlockscoutClient(mock_config)
+    client._session = mock_session
+
+    await client.get_token_transactions(CONTRACT, ADDRESS)
+
+    call_kwargs = mock_session.get.call_args[1]
+    assert "apikey" not in call_kwargs["params"]
+
+
+async def test_api_key_included_in_latest_block_params(mock_config):
+    mock_config.blockscout_api_key = "mykey123"
+    mock_session = _make_session({"result": "0x1234567"})
+    client = BlockscoutClient(mock_config)
+    client._session = mock_session
+
+    await client.get_latest_block_number()
+
+    call_kwargs = mock_session.get.call_args[1]
+    assert call_kwargs["params"]["apikey"] == "mykey123"
+
+
+async def test_api_key_included_in_contract_creation_params(mock_config):
+    mock_config.blockscout_api_key = "mykey123"
+    mock_session = _make_session({"creation_block_number": 12345678})
+    client = BlockscoutClient(mock_config)
+    client._session = mock_session
+
+    await client.get_contract_creation_block(CONTRACT)
+
+    call_kwargs = mock_session.get.call_args[1]
+    assert call_kwargs["params"]["apikey"] == "mykey123"
 
 
 # --- close ---
