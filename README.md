@@ -40,7 +40,7 @@ A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) and U
 
 ## How It Works
 
-The bot periodically checks the Etherscan API for new USDT/USDC transactions to the monitored addresses. Each transaction is analyzed by the spam detection system to identify suspicious patterns. When a new transaction is detected:
+The bot periodically checks for new USDT/USDC transactions to the monitored addresses. Etherscan is the primary data source; if it is unavailable, the bot automatically fails over to Blockscout and then Moralis (if configured), so monitoring continues during API outages or quota exhaustion. Each transaction is analyzed by the spam detection system to identify suspicious patterns. When a new transaction is detected:
 
 1. **Transaction Analysis** - The spam detection engine evaluates the transaction for risk factors
 2. **Risk Scoring** - A risk score (0-100) is calculated based on multiple detection filters
@@ -51,15 +51,18 @@ The bot periodically checks the Etherscan API for new USDT/USDC transactions to 
 
 ```
 usdt_monitor_bot/
-├── main.py          # Main application entry point
-├── config.py        # Configuration settings
-├── database.py      # Database operations
-├── etherscan.py     # Etherscan API integration
-├── handlers.py      # Telegram bot command handlers
-├── notifier.py      # Notification system
-├── checker.py       # Transaction checking logic
-├── spam_detector.py # Spam detection and risk analysis
-├── token_config.py  # Token configuration and registry
+├── main.py                 # Main application entry point
+├── config.py               # Configuration settings
+├── database.py             # Database operations
+├── blockchain_provider.py  # Provider protocol, circuit breaker, fallback chain
+├── etherscan.py            # Etherscan API client (primary)
+├── blockscout.py           # Blockscout API client (fallback 1)
+├── moralis.py              # Moralis API client (fallback 2)
+├── handlers.py             # Telegram bot command handlers
+├── notifier.py             # Notification system
+├── checker.py              # Transaction checking logic
+├── spam_detector.py        # Spam detection and risk analysis
+├── token_config.py         # Token configuration and registry
 └── __init__.py
 ```
 
@@ -76,6 +79,8 @@ usdt_monitor_bot/
 - Docker and Docker Compose (for containerized deployment)
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Etherscan API Key (from [Etherscan](https://etherscan.io/apis))
+- Blockscout API Key (optional, from [Blockscout](https://blockscout.com)) — enables higher rate limits on the Blockscout fallback
+- Moralis API Key (optional, from [Moralis](https://moralis.io)) — enables Moralis as a second fallback provider
 
 ## Dependencies
 
@@ -100,6 +105,15 @@ usdt_monitor_bot/
 - `MAX_TRANSACTIONS_PER_CHECK` - Maximum transactions to report per check cycle. Default: `10`
 - `ETHERSCAN_REQUEST_DELAY` - Delay between Etherscan API requests (seconds). Default: `0.2`
 - `ETHERSCAN_BASE_URL` - Custom Etherscan API base URL. Default: `https://api.etherscan.io/v2/api`
+
+### Fallback Providers
+
+- `BLOCKSCOUT_ENABLED` - Enable/disable Blockscout fallback. Default: `true`
+- `BLOCKSCOUT_BASE_URL` - Custom Blockscout API base URL. Default: `https://eth.blockscout.com/api`
+- `BLOCKSCOUT_API_KEY` - Blockscout API key for higher rate limits. Default: _(none)_
+- `MORALIS_API_KEY` - Moralis API key; set to enable Moralis as a second fallback. Default: _(none)_
+- `FALLBACK_FAILURE_THRESHOLD` - Consecutive provider failures before circuit opens. Default: `3`
+- `FALLBACK_COOLDOWN_SECONDS` - Seconds before a tripped circuit is re-attempted. Default: `300`
 
 ## Local Development
 
@@ -127,6 +141,8 @@ This project is licensed under the terms of the license included in the reposito
 
 ## Acknowledgements
 
-- [Etherscan API](https://etherscan.io/apis) for blockchain data
+- [Etherscan API](https://etherscan.io/apis) for blockchain data (primary)
+- [Blockscout API](https://blockscout.com) for blockchain data (fallback)
+- [Moralis API](https://moralis.io) for blockchain data (fallback)
 - [Aiogram](https://docs.aiogram.dev/) for the Telegram bot framework
 - [APScheduler](https://apscheduler.readthedocs.io/) for scheduling tasks
