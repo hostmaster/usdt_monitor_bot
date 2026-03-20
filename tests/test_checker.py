@@ -61,6 +61,7 @@ def mock_config():
     config.max_transaction_age_days = 7
     config.max_transactions_per_check = 10
     config.notification_dedup_cache_size = 10_000
+    config.contract_creation_cache_size = 1_000
 
     token_registry = MagicMock()
     usdt_token = MagicMock(contract_address=USDT_CONTRACT, symbol="USDT")
