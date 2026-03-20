@@ -392,15 +392,16 @@ class TransactionChecker:
             return 0
 
         # Send notifications for legitimate transactions only (skip if already sent recently when cache enabled)
+        # Register in dedup cache BEFORE the await to close the window between check and send.
         sent_count = 0
         for user_id in user_ids:
             if self._notification_dedup_max_size > 0 and (user_id, tx_hash) in self._notification_sent_cache:
                 logging.debug(f"Skip duplicate notify user={user_id} tx={tx_hash[:16]}...")
                 continue
+            self._add_notification_sent(user_id, tx_hash)
             await self._notifier.send_token_notification(
                 user_id, tx, tx_token_symbol, address_lower, risk_analysis
             )
-            self._add_notification_sent(user_id, tx_hash)
             sent_count += 1
         return sent_count
 
