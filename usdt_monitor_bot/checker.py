@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import List, Optional
 
 # Third-party
@@ -36,6 +37,13 @@ from usdt_monitor_bot.transaction_parser import (
     filter_transactions,
     format_transaction_log,
 )
+
+
+@dataclass
+class AddressProcessingResult:
+    new_last_block: int
+    processed_count: int
+    max_block_in_processed_batch: int  # 0 if no batch was processed
 
 
 class TransactionChecker:
@@ -127,43 +135,6 @@ class TransactionChecker:
 
         return all_transactions
 
-    # --- Delegating wrappers (keep tests and call sites that reference private methods working) ---
-
-    def _parse_timestamp(self, timestamp_str: str):
-        from usdt_monitor_bot.transaction_parser import parse_timestamp
-        return parse_timestamp(timestamp_str)
-
-    def _convert_to_transaction_metadata(self, tx: dict, token_decimals: int):
-        return convert_to_transaction_metadata(tx, token_decimals)
-
-    def _convert_db_transaction_to_metadata(self, db_tx: dict):
-        return convert_db_transaction_to_metadata(db_tx)
-
-    def _filter_transactions(self, all_transactions: List[dict], start_block: int) -> List[dict]:
-        return filter_transactions(
-            all_transactions,
-            start_block,
-            self._config.max_transaction_age_days,
-            self._config.max_transactions_per_check,
-        )
-
-    def _format_transaction_log(self, tx_metadata, token_symbol, address_lower, risk_analysis):
-        return format_transaction_log(tx_metadata, token_symbol, address_lower, risk_analysis)
-
-    async def _determine_next_block(
-        self,
-        start_block: int,
-        new_last_block: int,
-        raw_transactions: List[dict],
-        address_lower: str,
-        latest_block=None,
-    ):
-        return await self._block_tracker.determine_next_block(
-            start_block, new_last_block, raw_transactions, address_lower, latest_block
-        )
-
-    # --- End delegating wrappers ---
-
     async def _get_historical_transactions_metadata(
         self, address_lower: str, limit: int = 20
     ) -> List[TransactionMetadata]:
@@ -223,26 +194,23 @@ class TransactionChecker:
             creation_block = await self._etherscan.get_contract_creation_block(
                 address_lower
             )
-            # Cache the result (even if None); evict oldest entry only when adding a new key
-            if (
-                address_lower not in self._contract_creation_cache
-                and len(self._contract_creation_cache) >= self._contract_creation_cache_max_size
-            ):
-                self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
-            self._contract_creation_cache[address_lower] = creation_block
-
+            self._cache_contract_block(address_lower, creation_block)
             if creation_block is not None:
                 return max(0, current_block - creation_block)
         except Exception as e:
             logging.debug(f"Contract age lookup failed for {address_lower[:8]}: {e}")
-            if (
-                address_lower not in self._contract_creation_cache
-                and len(self._contract_creation_cache) >= self._contract_creation_cache_max_size
-            ):
-                self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
-            self._contract_creation_cache[address_lower] = None
+            self._cache_contract_block(address_lower, None)
 
         return 0  # Default to 0 if unable to determine
+
+    def _cache_contract_block(self, address_lower: str, block: Optional[int]) -> None:
+        """Store a contract creation block in the bounded cache, evicting oldest if at capacity."""
+        if (
+            address_lower not in self._contract_creation_cache
+            and len(self._contract_creation_cache) >= self._contract_creation_cache_max_size
+        ):
+            self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
+        self._contract_creation_cache[address_lower] = block
 
     async def _enrich_transaction_metadata(
         self,
@@ -381,7 +349,7 @@ class TransactionChecker:
         risk_analysis: Optional[RiskAnalysis] = None
         tx_metadata: Optional[TransactionMetadata] = None
 
-        if token_config and self._spam_detection_enabled:
+        if self._spam_detection_enabled:
             tx_metadata = convert_to_transaction_metadata(tx, token_config.decimals)
             if tx_metadata:
                 risk_analysis = await self._enrich_transaction_metadata(
@@ -467,7 +435,7 @@ class TransactionChecker:
         all_transactions: list[dict],
         start_block: int,
         latest_block: Optional[int] = None,
-    ) -> tuple[int, int, int]:
+    ) -> AddressProcessingResult:
         """
         Orchestrate filtering, notification, and determine the max block to update to.
 
@@ -477,9 +445,9 @@ class TransactionChecker:
             start_block: The starting block number
 
         Returns:
-            Tuple of (highest_block_number, processed_transaction_count, max_block_in_processed_batch).
-            max_block_in_processed_batch is the highest block number among transactions we actually
-            processed (stored/notified); used so we never persist a lower block and re-notify.
+            AddressProcessingResult with new_last_block, processed_count, and
+            max_block_in_processed_batch (highest block among processed txs; 0 if none processed).
+            max_block_in_processed_batch ensures we never persist a lower block and re-notify.
         """
         if not all_transactions:
             # No transactions found - return start_block to indicate we've checked up to this point
@@ -491,7 +459,7 @@ class TransactionChecker:
                 address_lower,
                 context="no transactions found",
             )
-            return (final_block, 0, 0)
+            return AddressProcessingResult(final_block, 0, 0)
 
         # Always update to the highest block seen to avoid re-scanning
         # But cap it to latest_block if available to prevent getting ahead of blockchain
@@ -528,7 +496,7 @@ class TransactionChecker:
                 address_lower,
                 context="no transactions after filtering",
             )
-            return (result_block, 0, 0)
+            return AddressProcessingResult(result_block, 0, 0)
 
         # Highest block among txs we are about to process; we must never persist a lower block
         max_block_in_batch = max(
@@ -554,7 +522,7 @@ class TransactionChecker:
         new_last_block = self._block_tracker.cap_block_to_latest(
             new_last_block, latest_block, address_lower
         )
-        return (new_last_block, processed_count, max_block_in_batch)
+        return AddressProcessingResult(new_last_block, processed_count, max_block_in_batch)
 
     def _should_update_block(
         self, start_block: int, block_result: BlockDeterminationResult
@@ -648,13 +616,12 @@ class TransactionChecker:
             if raw_transactions:
                 stats["addresses_with_transactions"] += 1
 
-            (
-                new_last_block,
-                processed_count,
-                max_block_in_processed_batch,
-            ) = await self._process_address_transactions(
+            result = await self._process_address_transactions(
                 address_lower, raw_transactions, start_block, latest_block
             )
+            new_last_block = result.new_last_block
+            processed_count = result.processed_count
+            max_block_in_processed_batch = result.max_block_in_processed_batch
             stats["total_transactions_processed"] += processed_count
 
             # Determine next block and update if needed
@@ -667,22 +634,14 @@ class TransactionChecker:
             )
 
             if self._should_update_block(start_block, block_result):
-                # Final defensive check: ensure we never update database with a value ahead of blockchain
-                # Fetch latest_block one more time right before update to catch any race conditions
-                final_latest_block = await self._etherscan.get_latest_block_number()
-                if final_latest_block is None:
-                    final_uncapped_block = (
-                        max(block_result.final_block_number, max_block_in_processed_batch)
-                        if max_block_in_processed_batch > 0
-                        else block_result.final_block_number
-                    )
+                if latest_block is None:
                     logging.warning(
                         f"Defensive block cap skipped for {address_lower[:8]}...: "
-                        f"could not fetch latest block, persisting uncapped {final_uncapped_block}"
+                        f"could not fetch latest block, persisting uncapped {block_result.final_block_number}"
                     )
                 final_block_to_update = self._block_tracker.cap_block_to_latest(
                     block_result.final_block_number,
-                    final_latest_block,
+                    latest_block,
                     address_lower,
                     context="defensive check before database update",
                     log_level="warning",

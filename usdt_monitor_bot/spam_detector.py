@@ -170,6 +170,30 @@ class SpamDetector:
         """Normalize an Ethereum address for comparison (lowercase, no 0x prefix)."""
         return addr.lower().replace("0x", "")
 
+    def _apply_filter(
+        self,
+        triggered: bool,
+        flag: RiskFlag,
+        weight_key: str,
+        bd_key: str,
+        flags: set,
+        score_breakdown: dict,
+        tx_hash: str,
+        from_address: str,
+        filter_name: str,
+        detail_str: str = "",
+    ) -> int:
+        """Apply one filter: update flags/score_breakdown, log, return score delta."""
+        weight = self.config[weight_key]
+        SpamDebuggingLogger.log_filter_evaluation(
+            tx_hash, from_address, filter_name, triggered, weight if triggered else 0, detail_str
+        )
+        if triggered:
+            flags.add(flag)
+            score_breakdown[bd_key] = weight
+            return weight
+        return 0
+
     def analyze_transaction(
         self,
         tx: TransactionMetadata,
@@ -245,52 +269,24 @@ class SpamDetector:
         score_breakdown: Dict[str, int] = {}
 
         # ========== FILTER 1: Value Threshold ==========
-        if Decimal("0") < tx.value < Decimal(str(self.config["dust_threshold_usd"])):
-            score += self.config["dust_risk_weight"]
-            flags.add(RiskFlag.DUST_AMOUNT)
+        score += self._apply_filter(
+            Decimal("0") < tx.value < Decimal(str(self.config["dust_threshold_usd"])),
+            RiskFlag.DUST_AMOUNT, "dust_risk_weight", "DUST_AMOUNT",
+            flags, score_breakdown, tx.tx_hash, tx.from_address, "DUST_AMOUNT",
+            f"value={float(tx.value):.2f}",
+        )
+        if RiskFlag.DUST_AMOUNT in flags:
             details["dust_amount"] = float(tx.value)
-            score_breakdown["DUST_AMOUNT"] = self.config["dust_risk_weight"]
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "DUST_AMOUNT",
-                True,
-                self.config["dust_risk_weight"],
-                f"value={float(tx.value):.2f}",
-            )
-        else:
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "DUST_AMOUNT",
-                False,
-                0,
-                f"value={float(tx.value):.2f}",
-            )
 
         # ========== FILTER 2: Zero-Value Transfer ==========
-        if tx.value == Decimal("0"):
-            score += self.config["zero_value_weight"]
-            flags.add(RiskFlag.ZERO_VALUE_TRANSFER)
-            score_breakdown["ZERO_VALUE"] = self.config["zero_value_weight"]
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "ZERO_VALUE_TRANSFER",
-                True,
-                self.config["zero_value_weight"],
-            )
-        else:
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "ZERO_VALUE_TRANSFER",
-                False,
-                0,
-            )
+        score += self._apply_filter(
+            tx.value == Decimal("0"),
+            RiskFlag.ZERO_VALUE_TRANSFER, "zero_value_weight", "ZERO_VALUE",
+            flags, score_breakdown, tx.tx_hash, tx.from_address, "ZERO_VALUE_TRANSFER",
+        )
 
         # ========== FILTER 3: Timing + Address Similarity ==========
-        last_tx_checked_for_similarity = False
+        _matched_last_sender = False  # set True if filter 3 already scored the last sender
 
         if historical_transactions:
             last_tx = historical_transactions[-1]
@@ -338,7 +334,7 @@ class SpamDetector:
                         "suffix_match": similarity.suffix_match,
                         "is_similar": similarity.is_similar,
                     }
-                    last_tx_checked_for_similarity = True
+                    _matched_last_sender = True
                     SpamDebuggingLogger.log_filter_evaluation(
                         tx.tx_hash,
                         tx.from_address,
@@ -359,10 +355,11 @@ class SpamDetector:
 
             # ========== FILTER 4: Check all Recent Addresses ==========
             # Compare against last 10 transactions (broader check)
-            # Exclude the last transaction if it was already checked in FILTER 3
+            # Exclude the last tx from broader scan only if filter 3 already matched it,
+            # to avoid adding similarity_weight twice for the same address
             transactions_to_check = (
                 historical_transactions[-10:-1]
-                if last_tx_checked_for_similarity and len(historical_transactions) > 1
+                if _matched_last_sender and len(historical_transactions) > 1
                 else historical_transactions[-10:]
             )
 
@@ -414,64 +411,36 @@ class SpamDetector:
             )
 
         # ========== FILTER 5: New Address Detection ==========
-        if tx.is_new_address:
-            score += self.config["new_address_weight"]
-            flags.add(RiskFlag.NEW_SENDER_ADDRESS)
-            score_breakdown["NEW_SENDER"] = self.config["new_address_weight"]
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "NEW_SENDER_ADDRESS",
-                True,
-                self.config["new_address_weight"],
-            )
-        else:
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "NEW_SENDER_ADDRESS",
-                False,
-                0,
-            )
+        score += self._apply_filter(
+            tx.is_new_address,
+            RiskFlag.NEW_SENDER_ADDRESS, "new_address_weight", "NEW_SENDER",
+            flags, score_breakdown, tx.tx_hash, tx.from_address, "NEW_SENDER_ADDRESS",
+        )
 
         # ========== FILTER 6: Brand New Contract Age ==========
-        if 0 <= tx.contract_age_blocks < self.config["min_blocks_for_address_age"]:
-            score += self.config["brand_new_contract_weight"]
-            flags.add(RiskFlag.BRAND_NEW_CONTRACT)
-            score_breakdown["BRAND_NEW_CONTRACT"] = self.config["brand_new_contract_weight"]
+        score += self._apply_filter(
+            0 <= tx.contract_age_blocks < self.config["min_blocks_for_address_age"],
+            RiskFlag.BRAND_NEW_CONTRACT, "brand_new_contract_weight", "BRAND_NEW_CONTRACT",
+            flags, score_breakdown, tx.tx_hash, tx.from_address, "BRAND_NEW_CONTRACT",
+            f"age={tx.contract_age_blocks} blocks",
+        )
+        if RiskFlag.BRAND_NEW_CONTRACT in flags:
             details["contract_age_blocks"] = tx.contract_age_blocks
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "BRAND_NEW_CONTRACT",
-                True,
-                self.config["brand_new_contract_weight"],
-                f"age={tx.contract_age_blocks} blocks",
-            )
-        else:
-            SpamDebuggingLogger.log_filter_evaluation(
-                tx.tx_hash,
-                tx.from_address,
-                "BRAND_NEW_CONTRACT",
-                False,
-                0,
-                f"age={tx.contract_age_blocks} blocks",
-            )
 
         # ========== FILTER 7: Rapid Address Cycling ==========
         if historical_transactions:
             unique_senders = self._detect_rapid_cycling(tx, historical_transactions)
             if unique_senders:
-                score += self.config.get("rapid_cycling_weight", 30)
+                score += self.config["rapid_cycling_weight"]
                 flags.add(RiskFlag.RAPID_ADDRESS_CYCLING)
-                score_breakdown["RAPID_CYCLING"] = self.config.get("rapid_cycling_weight", 30)
+                score_breakdown["RAPID_CYCLING"] = self.config["rapid_cycling_weight"]
                 details["rapid_cycling_senders"] = unique_senders
                 SpamDebuggingLogger.log_filter_evaluation(
                     tx.tx_hash,
                     tx.from_address,
                     "RAPID_ADDRESS_CYCLING",
                     True,
-                    self.config.get("rapid_cycling_weight", 30),
+                    self.config["rapid_cycling_weight"],
                     f"unique_senders={unique_senders}",
                 )
             else:
