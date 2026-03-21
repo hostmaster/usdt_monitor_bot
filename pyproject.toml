@@ -52,7 +52,7 @@ dev = [
 ]
 security = [
     "bandit==1.9.4",           # Security linter
-    "pip-audit==2.7.3",        # Dependency vulnerability checker (PyPA, no auth required)
+    "pip-audit==2.10.0",        # Dependency vulnerability checker (PyPA, no auth required)
 ]
 
 # Project URLs (optional)
