@@ -2,7 +2,6 @@
 
 import logging
 from decimal import Decimal
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ class SpamDebuggingLogger:
         tx_hash: str,
         score: int,
         is_suspicious: bool,
-        flags: List,
+        flags: list,
         threshold: int,
     ) -> None:
         """
@@ -67,7 +66,7 @@ class SpamDebuggingLogger:
         filter_name: str,
         triggered: bool,
         score_delta: int,
-        details: Optional[str] = None,
+        details: str | None = None,
     ) -> None:
         """
         Log evaluation of each spam filter for this transaction.
@@ -181,7 +180,7 @@ class SpamDebuggingLogger:
     @staticmethod
     def log_timing_context(
         tx_hash: str,
-        time_since_prev_tx: Optional[int],
+        time_since_prev_tx: int | None,
         timing_window: int,
         timing_triggered: bool,
         historical_count: int,
@@ -219,7 +218,7 @@ class SpamDebuggingLogger:
         from_addr: str,
         final_score: int,
         threshold: int,
-        score_breakdown: Dict[str, int],
+        score_breakdown: dict[str, int],
     ) -> None:
         """
         Log final score accumulation with breakdown.
@@ -254,7 +253,7 @@ class SpamDebuggingLogger:
         value: Decimal,
         score: int,
         threshold: int,
-        triggered_flags: List,
+        triggered_flags: list,
         reason: str,
     ) -> None:
         """
@@ -286,7 +285,7 @@ class SpamDebuggingLogger:
         )
 
 
-def enable_spam_detector_debugging(min_score: Optional[int] = None) -> None:
+def enable_spam_detector_debugging(min_score: int | None = None) -> None:
     """
     Enable detailed debugging for spam detector bypass cases.
 

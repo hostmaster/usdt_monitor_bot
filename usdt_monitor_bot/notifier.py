@@ -7,8 +7,7 @@ including spam risk warnings.
 
 # Standard library
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 # Third-party
 from aiogram import Bot
@@ -39,8 +38,8 @@ class NotificationService:
         token_config: TokenConfig,
         is_incoming: bool,
         timestamp: int,
-        risk_analysis: Optional[RiskAnalysis] = None,
-    ) -> Optional[str]:
+        risk_analysis: RiskAnalysis | None = None,
+    ) -> str | None:
         """Format a token transaction notification message.
 
         Args:
@@ -81,7 +80,7 @@ class NotificationService:
                 return None
 
             # Validate timestamp
-            current_time = int(datetime.now(timezone.utc).timestamp())
+            current_time = int(datetime.now(UTC).timestamp())
             if not isinstance(timestamp, int) or timestamp < 0 or timestamp > current_time + ALLOWED_FUTURE_TIME_SECONDS:
                 logging.debug(f"Invalid timestamp: {timestamp}")
                 return None
@@ -119,14 +118,13 @@ class NotificationService:
             if risk_analysis and risk_analysis.is_suspicious:
                 try:
                     main_flag = risk_analysis.flags[0].value if risk_analysis.flags else "Suspicious"
-                    message = (
+                    return (
                         f"⚠️ {hbold('Spam Detected')}\n"
                         f"From: {hcode(address_to_show)}\n"
                         f"Amount: {formatted_value} {token_config.symbol}\n"
                         f"Risk: {risk_analysis.score}/100 ({main_flag})\n"
                         f"Tx: {hlink('View', f'{token_config.explorer_url}/tx/{tx_hash}')}"
                     )
-                    return message
                 except Exception as e:
                     logging.warning(f"Spam notice build error: {e}", exc_info=True)
                     return None
@@ -137,14 +135,13 @@ class NotificationService:
 
             # Construct the message
             try:
-                message = (
+                return (
                     f"🔔 New {token_config.symbol} Transfer!\n"
                     f"Amount: {hbold(f'{formatted_value} {token_config.symbol}')}\n"
                     f"{address_label}: {hcode(address_to_show)}\n"
                     f"Time: {formatted_time}\n"
                     f"Tx: {hlink('View on Etherscan', f'{token_config.explorer_url}/tx/{tx_hash}')}"
                 )
-                return message
             except Exception as e:
                 logging.warning(f"Message build error: {e}", exc_info=True)
                 return None
@@ -159,7 +156,7 @@ class NotificationService:
         tx: dict,
         token_type: str,
         monitored_address: str,
-        risk_analysis: Optional[RiskAnalysis] = None,
+        risk_analysis: RiskAnalysis | None = None,
     ) -> None:
         """
         Send a notification for a token transaction.
@@ -242,7 +239,7 @@ class NotificationService:
                 raise
 
 
-def format_token_amount(value: float, decimals: int = 6) -> Optional[str]:
+def format_token_amount(value: float, decimals: int = 6) -> str | None:
     """Format token amount with 2 decimal places, considering token decimals."""
     try:
         actual_value = float(value) / (10**decimals)
@@ -251,14 +248,14 @@ def format_token_amount(value: float, decimals: int = 6) -> Optional[str]:
         return None
 
 
-def format_address(address: str) -> Optional[str]:
+def format_address(address: str) -> str | None:
     """Format address for display."""
     if not address:
         return None
     return address  # Show full address
 
 
-def format_timestamp(timestamp: int) -> Optional[str]:
+def format_timestamp(timestamp: int) -> str | None:
     """Format timestamp as human-readable date."""
     try:
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")

@@ -1,6 +1,6 @@
 # tests/test_transaction_parser.py
 """Tests for transaction_parser utility functions."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from usdt_monitor_bot.etherscan import _MAX_VALID_BLOCK_NUMBER
@@ -10,7 +10,7 @@ from usdt_monitor_bot.transaction_parser import (
     parse_timestamp,
 )
 
-NOW_TS = int(datetime.now(timezone.utc).timestamp())
+NOW_TS = int(datetime.now(UTC).timestamp())
 
 
 # --- parse_timestamp ---

@@ -2,8 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
@@ -68,8 +67,8 @@ class MoralisClient:
     def __init__(self, config: BotConfig) -> None:
         self._api_key = config.moralis_api_key or ""
         self._timeout = ClientTimeout(total=30)
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._connector: Optional[TCPConnector] = None
+        self._session: aiohttp.ClientSession | None = None
+        self._connector: TCPConnector | None = None
         self._session_lock = asyncio.Lock()
 
     def _create_session(self) -> aiohttp.ClientSession:
@@ -100,7 +99,7 @@ class MoralisClient:
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
-    ) -> List[dict]:
+    ) -> list[dict]:
         await self._ensure_session()
 
         url = f"{_MORALIS_BASE_URL}/{address}/erc20/transfers"
@@ -131,12 +130,12 @@ class MoralisClient:
         except ValueError as e:
             raise MoralisError(f"Invalid JSON response: {e}") from e
 
-    async def get_latest_block_number(self) -> Optional[int]:
+    async def get_latest_block_number(self) -> int | None:
         """Returns current block number, or None on any failure (graceful degradation)."""
         await self._ensure_session()
 
         url = f"{_MORALIS_BASE_URL}/dateToBlock"
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         params = {"chain": "eth", "date": now_iso}
 
         session = self._session
@@ -155,14 +154,14 @@ class MoralisClient:
                 if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
                     return None
                 return parsed
-        except (aiohttp.ClientError, asyncio.TimeoutError):
+        except (TimeoutError, aiohttp.ClientError):
             return None
         except (ValueError, TypeError):
             return None
 
     async def get_contract_creation_block(
         self, contract_address: str
-    ) -> Optional[int]:
+    ) -> int | None:
         await self._ensure_session()
 
         url = f"{_MORALIS_BASE_URL}/{contract_address}"
@@ -184,7 +183,7 @@ class MoralisClient:
                 if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
                     return None
                 return parsed
-        except (aiohttp.ClientError, asyncio.TimeoutError):
+        except (TimeoutError, aiohttp.ClientError):
             return None
         except (ValueError, TypeError):
             return None

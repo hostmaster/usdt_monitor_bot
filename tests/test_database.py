@@ -1,13 +1,13 @@
 # tests/test_database.py
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from usdt_monitor_bot.database import (
+    _TRANSACTION_HISTORY_DDL,
     DatabaseManager,
     WalletAddResult,
-    _TRANSACTION_HISTORY_DDL,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -312,7 +312,7 @@ async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
     await memory_db_manager.add_wallet(4, monitored_addr)
 
     # Store old transaction (35 days ago)
-    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
+    old_timestamp = (datetime.now(UTC) - timedelta(days=35)).isoformat()
     await memory_db_manager.store_transaction(
         tx_hash="0xold",
         monitored_address=monitored_addr,
@@ -325,7 +325,7 @@ async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
     )
 
     # Store recent transaction
-    recent_timestamp = datetime.now(timezone.utc).isoformat()
+    recent_timestamp = datetime.now(UTC).isoformat()
     await memory_db_manager.store_transaction(
         tx_hash="0xrecent",
         monitored_address=monitored_addr,
@@ -554,7 +554,7 @@ async def test_cleanup_old_transactions_none_to_clean(
     await memory_db_manager.add_wallet(4, monitored_addr)
 
     # Store only recent transaction
-    recent_timestamp = datetime.now(timezone.utc).isoformat()
+    recent_timestamp = datetime.now(UTC).isoformat()
     await memory_db_manager.store_transaction(
         tx_hash="0xrecent",
         monitored_address=monitored_addr,
@@ -870,12 +870,12 @@ async def test_cleanup_old_transactions_removes_old(memory_db_manager: DatabaseM
     await memory_db_manager.add_wallet(901, addr)
 
     # Insert an old transaction (35 days ago)
-    old_ts = (datetime.now(timezone.utc) - timedelta(days=35)).isoformat()
+    old_ts = (datetime.now(UTC) - timedelta(days=35)).isoformat()
     await memory_db_manager.store_transaction(
         "0xold_tx", addr, "0xfrom", "0xto", 10.0, 100, old_ts, "USDT", risk_score=None
     )
     # Insert a recent transaction
-    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    recent_ts = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     await memory_db_manager.store_transaction(
         "0xrecent_tx", addr, "0xfrom", "0xto", 20.0, 101, recent_ts, "USDT", risk_score=None
     )
@@ -894,7 +894,7 @@ async def test_cleanup_old_transactions_none_to_delete(memory_db_manager: Databa
     await memory_db_manager.add_user(902, "u902", "U", "2")
     await memory_db_manager.add_wallet(902, addr)
 
-    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    recent_ts = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     await memory_db_manager.store_transaction(
         "0xfresh_tx", addr, "0xfrom", "0xto", 5.0, 200, recent_ts, "USDT", risk_score=None
     )

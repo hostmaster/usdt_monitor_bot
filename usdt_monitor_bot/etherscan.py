@@ -9,7 +9,6 @@ including transaction fetching and contract information retrieval.
 import asyncio
 import logging
 import time
-from typing import List, Optional
 
 # Third-party
 import aiohttp
@@ -24,7 +23,6 @@ from tenacity import (
 
 # Local
 from usdt_monitor_bot.config import BotConfig
-
 
 # Sanity cap for block numbers returned by the API.
 # Ethereum has ~22M blocks as of 2025; 10^9 gives ample headroom while
@@ -190,25 +188,25 @@ class EtherscanClient:
         clear_connector: bool = True,
         session_sleep: float = 0.0,
         connector_sleep: float = 0.0,
-    ) -> Optional[BaseException]:
+    ) -> BaseException | None:
         """Close session and connector with robust exception handling.
-        
+
         Ensures both session and connector are closed even if one raises
         BaseException (like asyncio.CancelledError). This prevents file
         descriptor leaks by ensuring connector cleanup always runs.
-        
+
         Args:
             clear_session: If True, set self._session = None after closing
             clear_connector: If True, set self._connector = None after closing
             session_sleep: Seconds to wait after session.close() (default: 0.0)
             connector_sleep: Seconds to wait after connector.close() (default: 0.0)
-        
+
         Returns:
             BaseException if one was raised during cleanup, None otherwise.
             Caller should re-raise this after all cleanup operations complete.
         """
         base_exception_to_reraise = None
-        
+
         # Close session with robust exception handling
         if self._session:
             try:
@@ -225,7 +223,7 @@ class EtherscanClient:
             finally:
                 if clear_session:
                     self._session = None
-        
+
         # Explicitly close connector to ensure file descriptors are released
         # This must run even if session.close() raised BaseException
         if self._connector:
@@ -244,7 +242,7 @@ class EtherscanClient:
             finally:
                 if clear_connector:
                     self._connector = None
-        
+
         return base_exception_to_reraise
 
     async def _ensure_session(self):
@@ -268,16 +266,16 @@ class EtherscanClient:
                     clear_session=False,
                     clear_connector=True,
                 )
-                
+
                 # Re-raise BaseException after cleanup is complete
                 if base_exception:
                     raise base_exception
-                
+
                 self._session = self._create_session()
 
     async def __aenter__(self):
         """Ensure a session exists when entering the context.
-        
+
         Uses _ensure_session() to reuse existing valid sessions or create
         a new one if needed. This prevents resource leaks and ensures proper
         cleanup of old sessions/connectors when an instance is reused.
@@ -287,7 +285,7 @@ class EtherscanClient:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close the session and connector when exiting the context.
-        
+
         Delegates to close() to ensure consistent cleanup behavior with
         graceful shutdown delays and proper exception handling.
         """
@@ -332,7 +330,7 @@ class EtherscanClient:
     )
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Get token transactions for an address from a specific block number.
 
@@ -425,7 +423,7 @@ class EtherscanClient:
         before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
         reraise=True,
     )
-    async def get_contract_creation_block(self, contract_address: str) -> Optional[int]:
+    async def get_contract_creation_block(self, contract_address: str) -> int | None:
         """
         Get the block number where a contract was created.
 
@@ -494,7 +492,7 @@ class EtherscanClient:
         except EtherscanRateLimitError:
             logging.debug(f"Rate limited: contract creation {contract_address[:10]}...")
             return None
-        except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, ValueError, aiohttp.ClientError) as e:
             logging.debug(f"Contract creation error {contract_address[:10]}...: {e}")
             return None
 
@@ -507,7 +505,7 @@ class EtherscanClient:
         before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
         reraise=True,
     )
-    async def get_latest_block_number(self) -> Optional[int]:
+    async def get_latest_block_number(self) -> int | None:
         """
         Get the latest block number from Ethereum mainnet.
 
@@ -583,7 +581,9 @@ class EtherscanClient:
                         if "rate limit" in result_str or (
                             "rate" in result_str and "limit" in result_str
                         ):
-                            raise EtherscanRateLimitError(f"Rate limit: {result}")
+                            raise EtherscanRateLimitError(
+                                f"Rate limit: {result}"
+                            ) from e
                         logging.debug(f"Block parse error: {e}")
                         return None
 
@@ -592,7 +592,7 @@ class EtherscanClient:
 
         try:
             return await self._make_request_with_rate_limiting(_make_request)
-        except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, ValueError, aiohttp.ClientError) as e:
             logging.debug(f"Latest block fetch error: {e}")
             return None
         # EtherscanRateLimitError is handled by @retry decorator
@@ -612,7 +612,7 @@ class EtherscanClient:
             session_sleep=0.1,  # Brief wait for graceful connection cleanup
             connector_sleep=0.1,  # Additional wait for connector cleanup
         )
-        
+
         # Re-raise BaseException after cleanup is complete
         if base_exception:
             raise base_exception

@@ -2,7 +2,6 @@ from datetime import datetime
 
 from aiogram.utils.markdown import hbold, hcode
 
-
 # --- General Messages ---
 ERROR_UNEXPECTED = "⚠️ An unexpected error occurred. Please try again later."
 ERROR_UNKNOWN_COMMAND = "😕 Sorry, I didn't understand that. Please use /help to see the available commands."

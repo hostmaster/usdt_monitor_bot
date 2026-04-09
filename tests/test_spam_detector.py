@@ -1,5 +1,5 @@
 # tests/test_spam_detector.py
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -35,7 +35,7 @@ def custom_detector():
 @pytest.fixture
 def base_timestamp():
     """Provides a base timestamp for test transactions."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @pytest.fixture

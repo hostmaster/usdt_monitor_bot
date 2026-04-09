@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import Literal
 
 from usdt_monitor_bot.blockchain_provider import BlockchainProvider
 
@@ -28,9 +28,9 @@ class BlockTracker:
         self,
         start_block: int,
         new_last_block: int,
-        raw_transactions: List[dict],
+        raw_transactions: list[dict],
         address_lower: str,
-        latest_block: Optional[int] = None,
+        latest_block: int | None = None,
     ) -> BlockDeterminationResult:
         """
         Determine the next block number to check, verifying against actual blockchain.
@@ -61,12 +61,15 @@ class BlockTracker:
         )
 
         # If no transactions found and blockchain hasn't advanced, update to latest
-        if not raw_transactions and final_block == start_block:
-            if latest_block >= start_block:
-                logging.debug(
-                    f"Advance {address_lower[:8]}... {start_block}->{latest_block}"
-                )
-                final_block = latest_block
+        if (
+            not raw_transactions
+            and final_block == start_block
+            and latest_block >= start_block
+        ):
+            logging.debug(
+                f"Advance {address_lower[:8]}... {start_block}->{latest_block}"
+            )
+            final_block = latest_block
 
         return BlockDeterminationResult(
             final_block_number=final_block,
@@ -76,7 +79,7 @@ class BlockTracker:
     @staticmethod
     def cap_block_to_latest(
         block_value: int,
-        latest_block: Optional[int],
+        latest_block: int | None,
         address_lower: str,
         context: str = "",
         log_level: Literal["debug", "warning"] = "debug",
@@ -108,7 +111,7 @@ class BlockTracker:
     def handle_latest_block_unavailable(
         start_block: int,
         new_last_block: int,
-        raw_transactions: List[dict],
+        raw_transactions: list[dict],
         address_lower: str,
     ) -> BlockDeterminationResult:
         """

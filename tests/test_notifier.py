@@ -1,6 +1,6 @@
 # tests/test_notifier.py
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -426,11 +426,10 @@ async def test_send_token_notification_telegram_api_error(
         method=MagicMock(), message="Chat not found"
     )
 
-    with caplog.at_level(logging.ERROR):
-        with pytest.raises(TelegramAPIError):
-            await notifier.send_token_notification(
-                USER1, TX1_INCOMING_USDT, "USDT", ADDR1
-            )
+    with caplog.at_level(logging.ERROR), pytest.raises(TelegramAPIError):
+        await notifier.send_token_notification(
+            USER1, TX1_INCOMING_USDT, "USDT", ADDR1
+        )
 
     assert "Send failed" in caplog.text
 
@@ -499,7 +498,7 @@ async def test_format_token_message_negative_value(notifier: NotificationService
 async def test_format_token_message_future_timestamp(notifier: NotificationService):
     """Test that far future timestamp returns None."""
     # Timestamp 2 hours in the future (beyond allowed tolerance)
-    future_ts = int(datetime.now(timezone.utc).timestamp()) + 7200
+    future_ts = int(datetime.now(UTC).timestamp()) + 7200
 
     result = notifier._format_token_message(
         tx_hash="0x123",

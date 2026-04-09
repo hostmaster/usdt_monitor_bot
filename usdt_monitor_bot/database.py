@@ -10,10 +10,8 @@ import asyncio
 import functools
 import logging
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum, auto
-from typing import List, Optional
-
 
 # Shared schema constants used by both _init_db_sync and the FK migration so
 # they can never drift out of sync with each other.
@@ -76,7 +74,7 @@ class DatabaseManager:
             # Enable row factory for named column access when requested
             if use_row_factory:
                 conn.row_factory = sqlite3.Row
-            
+
             cursor = conn.cursor()
             cursor.execute(query, params)
 
@@ -228,9 +226,9 @@ class DatabaseManager:
     def _add_user_sync(
         self,
         user_id: int,
-        username: Optional[str],
+        username: str | None,
         first_name: str,
-        last_name: Optional[str],
+        last_name: str | None,
     ) -> bool:
         query = "INSERT OR IGNORE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)"
         return self._execute_db_query(
@@ -264,7 +262,7 @@ class DatabaseManager:
                 logging.error(f"Track address failed: {address_lower[:8]}...")
                 return WalletAddResult.ADDED
             return WalletAddResult.ADDED
-        elif rowcount == 0:
+        if rowcount == 0:
             # Already exists, still ensure tracking
             tracked_rowcount = self._execute_db_query(
                 "INSERT OR IGNORE INTO tracked_addresses (address) VALUES (?)",
@@ -274,10 +272,10 @@ class DatabaseManager:
             if tracked_rowcount == -1:
                 logging.error(f"Track address failed: {address_lower[:8]}...")
             return WalletAddResult.ALREADY_EXISTS
-        else:  # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
-            return WalletAddResult.DB_ERROR
+        # rowcount == -1, meaning DB error during INSERT OR IGNORE into wallets
+        return WalletAddResult.DB_ERROR
 
-    def _list_wallets_sync(self, user_id: int) -> Optional[List[str]]:
+    def _list_wallets_sync(self, user_id: int) -> list[str] | None:
         results = self._execute_db_query(
             "SELECT address FROM wallets WHERE user_id = ? ORDER BY added_at",
             (user_id,),
@@ -293,7 +291,7 @@ class DatabaseManager:
         )
         return rowcount > 0
 
-    def _get_distinct_addresses_sync(self) -> Optional[List[str]]:
+    def _get_distinct_addresses_sync(self) -> list[str] | None:
         results = self._execute_db_query(
             "SELECT DISTINCT address FROM wallets", fetch_all=True
         )
@@ -303,7 +301,7 @@ class DatabaseManager:
         # If needed, add cleanup logic separately.
         return [row[0] for row in results] if isinstance(results, list) else None
 
-    def _get_users_for_address_sync(self, address: str) -> Optional[List[int]]:
+    def _get_users_for_address_sync(self, address: str) -> list[int] | None:
         results = self._execute_db_query(
             "SELECT user_id FROM wallets WHERE address = ?",
             (address.lower(),),
@@ -332,7 +330,7 @@ class DatabaseManager:
     def _update_last_checked_block_sync(self, address: str, block_number: int) -> bool:
         query = "INSERT OR REPLACE INTO tracked_addresses (address, last_checked_block, last_check_time) VALUES (?, ?, ?)"
         # Convert datetime to ISO 8601 string format (UTC recommended)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         return self._execute_db_query(
             query,
             (address.lower(), block_number, now_iso),
@@ -343,9 +341,9 @@ class DatabaseManager:
     async def add_user(
         self,
         user_id: int,
-        username: Optional[str],
+        username: str | None,
         first_name: str,
-        last_name: Optional[str],
+        last_name: str | None,
     ) -> bool:
         return await self._run_sync_db_operation(
             self._add_user_sync, user_id, username, first_name, last_name
@@ -359,7 +357,7 @@ class DatabaseManager:
             self._add_wallet_sync, user_id, address
         )
 
-    async def list_wallets(self, user_id: int) -> Optional[List[str]]:
+    async def list_wallets(self, user_id: int) -> list[str] | None:
         return await self._run_sync_db_operation(self._list_wallets_sync, user_id)
 
     async def remove_wallet(self, user_id: int, address: str) -> bool:
@@ -367,10 +365,10 @@ class DatabaseManager:
             self._remove_wallet_sync, user_id, address
         )
 
-    async def get_distinct_addresses(self) -> Optional[List[str]]:
+    async def get_distinct_addresses(self) -> list[str] | None:
         return await self._run_sync_db_operation(self._get_distinct_addresses_sync)
 
-    async def get_users_for_address(self, address: str) -> Optional[List[int]]:
+    async def get_users_for_address(self, address: str) -> list[int] | None:
         return await self._run_sync_db_operation(
             self._get_users_for_address_sync, address
         )
@@ -398,7 +396,7 @@ class DatabaseManager:
         block_number: int,
         timestamp: str,  # ISO format string
         token_symbol: str,
-        risk_score: Optional[int] = None,
+        risk_score: int | None = None,
     ) -> bool:
         """
         Store a transaction in the history table.
@@ -440,7 +438,7 @@ class DatabaseManager:
 
     def _get_recent_transactions_sync(
         self, monitored_address: str, limit: int = 20
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Get recent transactions for a monitored address, ordered by block number descending.
 
@@ -493,7 +491,7 @@ class DatabaseManager:
             Number of transactions deleted
         """
         # Calculate cutoff timestamp
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
+        cutoff = datetime.now(UTC) - timedelta(days=days_to_keep)
         cutoff_iso = cutoff.isoformat()
 
         query = "DELETE FROM transaction_history WHERE timestamp < ?"
@@ -534,7 +532,7 @@ class DatabaseManager:
         block_number: int,
         timestamp: str,
         token_symbol: str,
-        risk_score: Optional[int] = None,
+        risk_score: int | None = None,
     ) -> bool:
         """Store a transaction in the history table."""
         return await self._run_sync_db_operation(
@@ -552,7 +550,7 @@ class DatabaseManager:
 
     async def get_recent_transactions(
         self, monitored_address: str, limit: int = 20
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Get recent transactions for a monitored address."""
         return await self._run_sync_db_operation(
             self._get_recent_transactions_sync, monitored_address, limit
@@ -578,7 +576,7 @@ class DatabaseManager:
         user_id: int,
         min_risk_score: int = 50,
         limit: int = 50,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Get spam transactions for all addresses monitored by a user.
 
@@ -667,7 +665,7 @@ class DatabaseManager:
         user_id: int,
         min_risk_score: int = 50,
         limit: int = 50,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Get spam transactions for all addresses monitored by a user."""
         return await self._run_sync_db_operation(
             self._get_spam_transactions_for_user_sync, user_id, min_risk_score, limit

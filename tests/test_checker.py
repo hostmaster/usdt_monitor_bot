@@ -1,7 +1,6 @@
 # tests/test_checker.py
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -31,7 +30,7 @@ USER2 = 202
 BLOCK_ADDR1_START = 1000
 USDT_CONTRACT = "0xdac17f958d2ee523a2206206994597c13d831ec7"
 USDC_CONTRACT = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-NOW_TS = int(datetime.now(timezone.utc).timestamp())
+NOW_TS = int(datetime.now(UTC).timestamp())
 
 
 # --- Helper Functions ---
@@ -41,7 +40,7 @@ def create_mock_tx(
     to_addr: str,
     contract_address: str,
     timestamp: int = NOW_TS,
-    tx_hash: Optional[str] = None,
+    tx_hash: str | None = None,
 ) -> dict:
     """Creates a mock transaction dictionary."""
     if tx_hash is None:
