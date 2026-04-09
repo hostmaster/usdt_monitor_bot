@@ -203,6 +203,11 @@ class DatabaseManager:
                    ON transaction_history(monitored_address, block_number DESC)""",
             """CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp
                    ON transaction_history(timestamp)""",
+            # Speeds up get_users_for_address: the existing UNIQUE(user_id, address)
+            # index cannot be used for address-only lookups, forcing a full scan
+            # on every checker cycle x monitored address.
+            """CREATE INDEX IF NOT EXISTS idx_wallets_address
+                   ON wallets(address)""",
         ]
         success = True
         for query in queries:
