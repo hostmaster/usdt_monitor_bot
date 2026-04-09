@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 
 # Third-party
@@ -66,9 +66,11 @@ class TransactionChecker:
             spam_detector if spam_detector is not None else SpamDetector()
         )
         self._spam_detection_enabled = True  # Enable by default
-        # Cache for contract creation blocks to avoid repeated API calls.
-        # Bounded to prevent unbounded growth in long-running bots.
-        self._contract_creation_cache: dict[str, int | None] = {}
+        # LRU cache for contract creation blocks to avoid repeated API calls.
+        # Bounded to prevent unbounded growth in long-running bots. Using
+        # OrderedDict so that on each hit we promote the entry to the end,
+        # and on overflow we evict the least-recently-used entry.
+        self._contract_creation_cache: OrderedDict[str, int | None] = OrderedDict()
         self._contract_creation_cache_max_size = config.contract_creation_cache_size
         # Bounded in-memory cache of (user_id, tx_hash) to suppress duplicate notifications
         self._notification_sent_cache: set[tuple[int, str]] = set()
@@ -182,8 +184,9 @@ class TransactionChecker:
         """
         address_lower = address.lower()
 
-        # Check cache first
+        # Check cache first (and promote on hit — LRU semantics)
         if address_lower in self._contract_creation_cache:
+            self._contract_creation_cache.move_to_end(address_lower)
             creation_block = self._contract_creation_cache[address_lower]
             if creation_block is not None:
                 return max(0, current_block - creation_block)
@@ -204,12 +207,22 @@ class TransactionChecker:
         return 0  # Default to 0 if unable to determine
 
     def _cache_contract_block(self, address_lower: str, block: int | None) -> None:
-        """Store a contract creation block in the bounded cache, evicting oldest if at capacity."""
-        if (
-            address_lower not in self._contract_creation_cache
-            and len(self._contract_creation_cache) >= self._contract_creation_cache_max_size
-        ):
-            self._contract_creation_cache.pop(next(iter(self._contract_creation_cache)))
+        """Store a contract creation block in the bounded LRU cache.
+
+        On overflow, evicts the least-recently-used entry. On update of an
+        existing entry, promotes it to most-recently-used. Becomes a no-op
+        when the cache is disabled (max size <= 0), matching the defensive
+        pattern used by `_add_notification_sent`.
+        """
+        if self._contract_creation_cache_max_size <= 0:
+            return  # Cache disabled when size is not positive
+        if address_lower in self._contract_creation_cache:
+            self._contract_creation_cache[address_lower] = block
+            self._contract_creation_cache.move_to_end(address_lower)
+            return
+        if len(self._contract_creation_cache) >= self._contract_creation_cache_max_size:
+            # popitem(last=False) removes the oldest (least-recently-used) entry
+            self._contract_creation_cache.popitem(last=False)
         self._contract_creation_cache[address_lower] = block
 
     async def _enrich_transaction_metadata(
