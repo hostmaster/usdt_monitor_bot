@@ -78,12 +78,26 @@ asyncio_mode = "auto" # Enable asyncio support via pytest-asyncio
 # Explicitly set the default loop scope for async fixtures
 asyncio_default_fixture_loop_scope = "function"
 
-# Ruff linter configuration (optional, example)
-# [tool.ruff]
-# line-length = 88
-# select = ["E", "W", "F", "I", "UP"] # Select error codes (E/W=pycodestyle, F=pyflakes, I=isort, UP=pyupgrade)
-# ignore = []
-# exclude = [".venv", "venv", ".git", "__pycache__"]
+# Ruff linter configuration
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+extend-exclude = [".venv", "venv", ".git", "__pycache__", "data"]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, UP = pyupgrade,
+# B = flake8-bugbear, SIM = flake8-simplify, RET = flake8-return
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RET"]
+ignore = [
+    "E501",  # line too long — formatter's job, and long f-strings are common
+    "B008",  # function calls in defaults — intentional for config module
+    "SIM108", # ternary suggestions — often hurt readability of validation code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "B011",  # assert False is fine in tests
+]
 
 # Black code formatter configuration (optional, example)
 # [tool.black]
