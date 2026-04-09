@@ -56,7 +56,7 @@ The constant is defined three times and imported from `etherscan.py` in `transac
 await asyncio.sleep(self._config.etherscan_request_delay / 2 or 0.1)
 ```
 
-`EtherscanClient` already paces every request through `AdaptiveRateLimiter.wait()`. This is double-gating: every token fetch is delayed twice. The duplicate is also present at the top of `_process_single_address`. Delete both and let the rate limiter do its job.
+`EtherscanClient` already paces every request through `AdaptiveRateLimiter.wait()`. This is double-gating: every token fetch is delayed twice. A similar redundant sleep is also present at the top of `_process_single_address`. Delete both and let the rate limiter do its job.
 
 **Expected effect:** ~30–50% faster cycles with no change in actual API rate.
 
@@ -127,7 +127,7 @@ The `_spam_float_keys`/`_spam_int_keys` tables are a nice pattern — keep them,
 ### 10. Simplify `notifier._format_token_message`
 **File:** `notifier.py`
 
-Has ~8 nested `try/except` blocks each returning `None` with a debug log. Consolidate into one try block with small pure validators (`_validate_tx_hash`, `_validate_address`, `_validate_value`) that return `bool` and log once at entry. Cuts the function in half.
+Has several distinct `try/except` blocks for formatting, each returning `None` with a debug log. Consolidate into one try block with small pure validators (`_validate_tx_hash`, `_validate_address`, `_validate_value`) that return `bool` and log once at entry. Cuts the function in half.
 
 ---
 
