@@ -9,7 +9,6 @@ and provides default values.
 import logging
 import os
 import sys
-from typing import Optional
 
 # Third-party
 from dotenv import load_dotenv
@@ -60,12 +59,12 @@ class BotConfig:
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
         notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
         contract_creation_cache_size: int = 1_000,  # Max contract addresses to cache creation blocks for
-        spam_detector_config: Optional[dict] = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
+        spam_detector_config: dict | None = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
         bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
         blockscout_base_url: str = "https://eth.blockscout.com/api",
         blockscout_enabled: bool = True,
-        blockscout_api_key: Optional[str] = None,
-        moralis_api_key: Optional[str] = None,
+        blockscout_api_key: str | None = None,
+        moralis_api_key: str | None = None,
         fallback_failure_threshold: int = 3,
         fallback_cooldown_seconds: float = 300.0,
     ):
@@ -112,7 +111,7 @@ class BotConfig:
         self.contract_creation_cache_size = contract_creation_cache_size
 
         # Spam detector threshold overrides (None = use SpamDetector defaults)
-        self.spam_detector_config: Optional[dict] = spam_detector_config if spam_detector_config else None
+        self.spam_detector_config: dict | None = spam_detector_config if spam_detector_config else None
 
         # Bot session connection limit
         self.bot_session_connection_limit = bot_session_connection_limit
@@ -155,11 +154,11 @@ class BotConfig:
         )
         self.token_registry.register_token(usdc_config)
 
-    def get_token_config(self, symbol: str) -> Optional[TokenConfig]:
+    def get_token_config(self, symbol: str) -> TokenConfig | None:
         """Get token configuration by symbol."""
         return self.token_registry.get_token(symbol)
 
-    def get_token_by_address(self, address: str) -> Optional[TokenConfig]:
+    def get_token_by_address(self, address: str) -> TokenConfig | None:
         """Get token configuration by contract address."""
         return self.token_registry.get_token_by_address(address)
 
@@ -256,8 +255,8 @@ def load_config() -> BotConfig:
     )
     blockscout_enabled_env = os.getenv("BLOCKSCOUT_ENABLED", "true").lower()
     blockscout_enabled = blockscout_enabled_env not in ("false", "0", "no", "off")
-    blockscout_api_key: Optional[str] = os.getenv("BLOCKSCOUT_API_KEY") or None
-    moralis_api_key: Optional[str] = os.getenv("MORALIS_API_KEY") or None
+    blockscout_api_key: str | None = os.getenv("BLOCKSCOUT_API_KEY") or None
+    moralis_api_key: str | None = os.getenv("MORALIS_API_KEY") or None
     fallback_failure_threshold = _get_env_int("FALLBACK_FAILURE_THRESHOLD", 3)
     fallback_cooldown_seconds = _get_env_float("FALLBACK_COOLDOWN_SECONDS", 300.0)
 

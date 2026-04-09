@@ -1,15 +1,14 @@
 """Pure parsing and conversion functions for transaction data."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from usdt_monitor_bot.etherscan import _MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.spam_detector_models import RiskAnalysis, TransactionMetadata
 
 
-def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
+def parse_timestamp(timestamp_str: str) -> datetime | None:
     """
     Parse timestamp from database format (ISO or Unix).
 
@@ -22,7 +21,7 @@ def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
     try:
         if "T" in timestamp_str or "+" in timestamp_str:
             return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        return datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
+        return datetime.fromtimestamp(float(timestamp_str), tz=UTC)
     except (ValueError, TypeError):
         logging.debug(f"Invalid DB timestamp: {timestamp_str}")
         return None
@@ -30,7 +29,7 @@ def parse_timestamp(timestamp_str: str) -> Optional[datetime]:
 
 def convert_to_transaction_metadata(
     tx: dict, token_decimals: int
-) -> Optional[TransactionMetadata]:
+) -> TransactionMetadata | None:
     """
     Convert Etherscan transaction dict to TransactionMetadata.
 
@@ -55,7 +54,7 @@ def convert_to_transaction_metadata(
 
         # Convert timestamp
         try:
-            timestamp = datetime.fromtimestamp(int(timestamp_str), tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(int(timestamp_str), tz=UTC)
         except (ValueError, TypeError) as e:
             logging.debug(f"Invalid timestamp in tx {tx_hash[:16]}: {e}")
             return None
@@ -86,7 +85,7 @@ def convert_to_transaction_metadata(
 
 def convert_db_transaction_to_metadata(
     db_tx: dict,
-) -> Optional[TransactionMetadata]:
+) -> TransactionMetadata | None:
     """
     Convert database transaction dict to TransactionMetadata.
 
@@ -118,11 +117,11 @@ def convert_db_transaction_to_metadata(
 
 
 def filter_transactions(
-    all_transactions: List[dict],
+    all_transactions: list[dict],
     start_block: int,
     max_age_days: int,
     max_per_check: int,
-) -> List[dict]:
+) -> list[dict]:
     """
     Filter transactions by block, age, and limit the count.
 
@@ -135,7 +134,7 @@ def filter_transactions(
     Returns:
         Filtered and sorted list of transactions ready for processing
     """
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
     max_age_seconds = max_age_days * 24 * 60 * 60
 
     filtered = []
@@ -151,7 +150,7 @@ def filter_transactions(
             age_seconds = (
                 current_time
                 - datetime.fromtimestamp(
-                    int(tx.get("timeStamp", 0)), tz=timezone.utc
+                    int(tx.get("timeStamp", 0)), tz=UTC
                 )
             ).total_seconds()
 

@@ -6,11 +6,11 @@ import aiohttp  # Import aiohttp
 import pytest
 
 from usdt_monitor_bot.etherscan import (
+    _MAX_VALID_BLOCK_NUMBER,
     AdaptiveRateLimiter,
     EtherscanClient,
     EtherscanError,
     EtherscanRateLimitError,
-    _MAX_VALID_BLOCK_NUMBER,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -291,7 +291,7 @@ async def test_get_token_transactions_timeout_retried(
     mock_session_get = mock_aiohttp_session.get
 
     # Configure .get() to raise TimeoutError directly
-    mock_session_get.side_effect = [asyncio.TimeoutError("Simulated timeout")] * 5
+    mock_session_get.side_effect = [TimeoutError("Simulated timeout")] * 5
 
     contract_address = "0xusdt"
     address = "0xabc"

@@ -7,11 +7,11 @@ and performs spam detection analysis.
 
 # Standard library
 import asyncio
+import contextlib
 import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional
 
 # Third-party
 import aiohttp
@@ -55,7 +55,7 @@ class TransactionChecker:
         db_manager: DatabaseManager,
         etherscan_client: BlockchainProvider,
         notifier: NotificationService,
-        spam_detector: Optional[SpamDetector] = None,
+        spam_detector: SpamDetector | None = None,
     ):
         self._config = config
         self._db = db_manager
@@ -68,7 +68,7 @@ class TransactionChecker:
         self._spam_detection_enabled = True  # Enable by default
         # Cache for contract creation blocks to avoid repeated API calls.
         # Bounded to prevent unbounded growth in long-running bots.
-        self._contract_creation_cache: dict[str, Optional[int]] = {}
+        self._contract_creation_cache: dict[str, int | None] = {}
         self._contract_creation_cache_max_size = config.contract_creation_cache_size
         # Bounded in-memory cache of (user_id, tx_hash) to suppress duplicate notifications
         self._notification_sent_cache: set[tuple[int, str]] = set()
@@ -137,7 +137,7 @@ class TransactionChecker:
 
     async def _get_historical_transactions_metadata(
         self, address_lower: str, limit: int = 20
-    ) -> List[TransactionMetadata]:
+    ) -> list[TransactionMetadata]:
         """
         Get historical transactions from database and convert to TransactionMetadata.
 
@@ -203,7 +203,7 @@ class TransactionChecker:
 
         return 0  # Default to 0 if unable to determine
 
-    def _cache_contract_block(self, address_lower: str, block: Optional[int]) -> None:
+    def _cache_contract_block(self, address_lower: str, block: int | None) -> None:
         """Store a contract creation block in the bounded cache, evicting oldest if at capacity."""
         if (
             address_lower not in self._contract_creation_cache
@@ -216,7 +216,7 @@ class TransactionChecker:
         self,
         tx_metadata: TransactionMetadata,
         address_lower: str,
-        historical_metadata: List[TransactionMetadata],
+        historical_metadata: list[TransactionMetadata],
     ) -> RiskAnalysis:
         """
         Enrich transaction metadata with spam detection data and perform risk analysis.
@@ -248,21 +248,19 @@ class TransactionChecker:
             whitelisted_addresses.add(token.contract_address)
 
         # Analyze transaction with whitelist and monitored address
-        risk_analysis = self._spam_detector.analyze_transaction(
+        return self._spam_detector.analyze_transaction(
             tx_metadata,
             historical_metadata,
             whitelisted_addresses=whitelisted_addresses,
             monitored_address=address_lower,
         )
 
-        return risk_analysis
-
     async def _store_transaction_safely(
         self,
         tx_metadata: TransactionMetadata,
         token_symbol: str,
         address_lower: str,
-        risk_score: Optional[int],
+        risk_score: int | None,
     ) -> None:
         """Store transaction in database, logging warnings on failure."""
         try:
@@ -303,17 +301,15 @@ class TransactionChecker:
         """Roll back a dedup cache entry — used when a notification send fails."""
         key = (user_id, tx_hash)
         self._notification_sent_cache.discard(key)
-        try:
+        with contextlib.suppress(ValueError):
             self._notification_sent_order.remove(key)
-        except ValueError:
-            pass
 
     async def _process_single_transaction(
         self,
         tx: dict,
-        user_ids: List[int],
+        user_ids: list[int],
         address_lower: str,
-        historical_metadata: List[TransactionMetadata],
+        historical_metadata: list[TransactionMetadata],
     ) -> int:
         """
         Process a single transaction: analyze, store, log, and notify.
@@ -346,8 +342,8 @@ class TransactionChecker:
             return 0
 
         # Process with spam detection (only if token config is available)
-        risk_analysis: Optional[RiskAnalysis] = None
-        tx_metadata: Optional[TransactionMetadata] = None
+        risk_analysis: RiskAnalysis | None = None
+        tx_metadata: TransactionMetadata | None = None
 
         if self._spam_detection_enabled:
             tx_metadata = convert_to_transaction_metadata(tx, token_config.decimals)
@@ -399,7 +395,7 @@ class TransactionChecker:
         return sent_count
 
     async def _send_notifications_for_batch(
-        self, user_ids: List[int], batch: List[dict], address_lower: str
+        self, user_ids: list[int], batch: list[dict], address_lower: str
     ) -> None:
         """
         Send notifications for a batch of transactions with spam detection.
@@ -434,7 +430,7 @@ class TransactionChecker:
         address_lower: str,
         all_transactions: list[dict],
         start_block: int,
-        latest_block: Optional[int] = None,
+        latest_block: int | None = None,
     ) -> AddressProcessingResult:
         """
         Orchestrate filtering, notification, and determine the max block to update to.
@@ -478,7 +474,7 @@ class TransactionChecker:
         # Dedupe by tx_hash: API can return duplicate events (same tx in multiple token responses,
         # or multiple transfer events for the same token in one tx). Notify at most once per user per tx per cycle.
         seen_hashes: set[str] = set()
-        unique_batch: List[dict] = []
+        unique_batch: list[dict] = []
         for tx in processing_batch:
             h = tx.get("hash")
             if h and h not in seen_hashes:
@@ -538,7 +534,7 @@ class TransactionChecker:
         address_lower: str,
         start_block: int,
         block_result: BlockDeterminationResult,
-        actual_block: Optional[int] = None,
+        actual_block: int | None = None,
     ) -> None:
         """Log block update with appropriate level."""
         new_block = (
@@ -667,7 +663,7 @@ class TransactionChecker:
         except EtherscanRateLimitError:
             logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
             stats["warnings_count"] += 1
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             logging.error(f"Network error {address_lower[:8]}...: {e}")
             stats["errors_count"] += 1
         except Exception as e:

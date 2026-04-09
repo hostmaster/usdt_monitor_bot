@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Dict, Optional
 
 
 @dataclass
@@ -28,7 +27,7 @@ class TokenRegistry:
     """Registry of supported tokens."""
 
     def __init__(self):
-        self._tokens: Dict[str, TokenConfig] = {}
+        self._tokens: dict[str, TokenConfig] = {}
 
     def register_token(self, token: TokenConfig) -> None:
         """Register a new token configuration."""
@@ -36,11 +35,11 @@ class TokenRegistry:
             raise ValueError(f"Token with symbol {token.symbol} already registered")
         self._tokens[token.symbol] = token
 
-    def get_token(self, symbol: str) -> Optional[TokenConfig]:
+    def get_token(self, symbol: str) -> TokenConfig | None:
         """Get token configuration by symbol."""
         return self._tokens.get(symbol.upper())
 
-    def get_token_by_address(self, address: str) -> Optional[TokenConfig]:
+    def get_token_by_address(self, address: str) -> TokenConfig | None:
         """Get token configuration by contract address."""
         address = address.lower()
         for token in self._tokens.values():
@@ -48,7 +47,7 @@ class TokenRegistry:
                 return token
         return None
 
-    def get_all_tokens(self) -> Dict[str, TokenConfig]:
+    def get_all_tokens(self) -> dict[str, TokenConfig]:
         """Get all registered tokens."""
         return self._tokens.copy()
 

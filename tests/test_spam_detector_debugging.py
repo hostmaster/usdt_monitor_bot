@@ -5,7 +5,7 @@ Demonstrates how debug logging helps identify spam bypass cases.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -24,13 +24,13 @@ def reset_debug_logger_state():
     # Save original values
     original_debug_enabled = SpamDebuggingLogger.DEBUG_ENABLED
     original_min_score = SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG
-    
+
     # Reset to defaults before each test
     SpamDebuggingLogger.DEBUG_ENABLED = False
     SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG = 45
-    
+
     yield
-    
+
     # Restore original values after test (though autouse=True means this runs before each test)
     SpamDebuggingLogger.DEBUG_ENABLED = original_debug_enabled
     SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG = original_min_score
@@ -46,10 +46,10 @@ def test_debug_logging_enabled():
 def test_debug_logging_filter_evaluation(caplog):
     """Test that filter evaluations are logged when debug enabled."""
     enable_spam_detector_debugging()
-    
+
     detector = SpamDetector()
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     tx = TransactionMetadata(
         tx_hash="0xdebugtest123456",
         from_address="0x1111111111111111111111111111111111111111",
@@ -58,10 +58,10 @@ def test_debug_logging_filter_evaluation(caplog):
         block_number=1000,
         timestamp=now,
     )
-    
+
     with caplog.at_level(logging.DEBUG):
         detector.analyze_transaction(tx, [])
-    
+
     # Check that filter evaluation logs were generated
     log_text = caplog.text
     assert "[FILTER]" in log_text, "Filter evaluation logging should be present when debug enabled"
@@ -74,10 +74,10 @@ def test_debug_logging_filter_evaluation(caplog):
 def test_debug_logging_bypass_case(caplog):
     """Test logging of bypass case with multiple flags but low score."""
     enable_spam_detector_debugging(min_score=10)
-    
+
     detector = SpamDetector(config={"dust_risk_weight": 5, "new_address_weight": 8})
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     # Transaction with multiple risk flags but value above dust threshold
     # so it requires other signals to approach the suspicious threshold
     tx = TransactionMetadata(
@@ -90,10 +90,10 @@ def test_debug_logging_bypass_case(caplog):
         is_new_address=True,  # New sender (+8)
         contract_age_blocks=5,  # Brand new contract (+35)
     )
-    
+
     with caplog.at_level(logging.DEBUG):
         detector.analyze_transaction(tx, [])
-    
+
     log_text = caplog.text
     # Should see bypass case (WARNING level) and verdict (DEBUG level)
     assert "[SPAM_BYPASS_CASE]" in log_text
@@ -104,7 +104,7 @@ def test_debug_logging_bypass_case(caplog):
 def test_debug_logging_similarity(caplog):
     """Test detailed similarity analysis logging."""
     enable_spam_detector_debugging()
-    
+
     # Log similarity analysis
     with caplog.at_level(logging.DEBUG):
         SpamDebuggingLogger.log_similarity_analysis(
@@ -118,7 +118,7 @@ def test_debug_logging_similarity(caplog):
             suffix_threshold=4,
             is_similar=True,
         )
-    
+
     # Verify log was produced (debug is enabled, so it should always appear)
     log_text = caplog.text
     assert "[SIMILARITY]" in log_text
@@ -133,10 +133,10 @@ def test_debug_logging_disabled_by_default():
     # Verify default state (fixture ensures clean state before each test)
     assert SpamDebuggingLogger.DEBUG_ENABLED is False
     assert SpamDebuggingLogger.MIN_SCORE_FOR_DEBUG == 45
-    
+
     # Create detector without enabling debug - should not change state
     SpamDetector()
-    
+
     # State should still be disabled
     assert SpamDebuggingLogger.DEBUG_ENABLED is False
 
@@ -144,7 +144,7 @@ def test_debug_logging_disabled_by_default():
 def test_whitelist_check_logging(caplog):
     """Test whitelist check logging."""
     enable_spam_detector_debugging()
-    
+
     with caplog.at_level(logging.DEBUG):
         SpamDebuggingLogger.log_whitelist_check(
             tx_hash="0xwhitelist123",
@@ -154,7 +154,7 @@ def test_whitelist_check_logging(caplog):
             whitelisted_to=False,
             from_is_monitored=False,
         )
-    
+
     # Verify log was produced
     log_text = caplog.text
     assert "[WHITELIST]" in log_text
@@ -166,7 +166,7 @@ def test_whitelist_check_logging(caplog):
 def test_multiple_filters_bypass_detection(caplog):
     """Test case where multiple filters are triggered but score stays below threshold."""
     enable_spam_detector_debugging(min_score=30)
-    
+
     # Custom config with lower weights
     custom_config = {
         "dust_risk_weight": 10,
@@ -177,10 +177,10 @@ def test_multiple_filters_bypass_detection(caplog):
         "zero_value_weight": 20,
         "suspicious_score_threshold": 80,  # High threshold
     }
-    
+
     detector = SpamDetector(config=custom_config)
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     # Transaction that triggers multiple filters
     tx1 = TransactionMetadata(
         tx_hash="0x111",
@@ -190,7 +190,7 @@ def test_multiple_filters_bypass_detection(caplog):
         block_number=1000,
         timestamp=now,
     )
-    
+
     tx2 = TransactionMetadata(
         tx_hash="0x222",
         from_address="0x3333333333333333333333333333333333333333",
@@ -201,15 +201,15 @@ def test_multiple_filters_bypass_detection(caplog):
         is_new_address=True,
         contract_age_blocks=5,
     )
-    
+
     with caplog.at_level(logging.DEBUG):
         analysis = detector.analyze_transaction(tx2, [tx1])
-    
+
     # Multiple flags triggered but score < 80
     assert len(analysis.flags) >= 2
     assert analysis.score < 80
     assert analysis.is_suspicious is False
-    
+
     # Check logs
     log_text = caplog.text
     assert "[SPAM_VERDICT]" in log_text

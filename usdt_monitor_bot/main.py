@@ -7,6 +7,7 @@ Telegram bot configuration, and transaction checking scheduler.
 
 # Standard library
 import asyncio
+import contextlib
 import logging
 import signal
 from datetime import datetime
@@ -161,10 +162,8 @@ async def main() -> None:
         # Cancel pending tasks
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
         # Check if polling task raised an exception
         for task in done:

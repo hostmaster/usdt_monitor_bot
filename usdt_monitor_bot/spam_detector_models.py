@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional
 
 
 class RiskFlag(Enum):
@@ -51,11 +50,11 @@ class RiskAnalysis:
     """Complete risk assessment of a transaction"""
 
     score: int  # 0-100
-    flags: List[RiskFlag]
+    flags: list[RiskFlag]
     is_suspicious: bool
     similarity_score: int = 0
     recommendation: str = ""
-    details: Optional[Dict] = None
+    details: dict | None = None
 
     def __post_init__(self):
         if self.details is None:

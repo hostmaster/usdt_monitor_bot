@@ -13,7 +13,6 @@ import logging
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
 
 from usdt_monitor_bot.spam_detector_logging import (  # noqa: F401
     SpamDebuggingLogger,
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 class SpamDetector:
     """Main spam/malicious transaction detector"""
 
-    def __init__(self, config: Optional[Dict] = None, enable_debug_logging: bool = False):
+    def __init__(self, config: dict | None = None, enable_debug_logging: bool = False):
         """
         Initialize detector with configuration
 
@@ -54,7 +53,7 @@ class SpamDetector:
             )
 
     @staticmethod
-    def _default_config() -> Dict:
+    def _default_config() -> dict:
         """Default configuration values based on research"""
         return {
             # Value thresholds (in USDT/USDC)
@@ -197,9 +196,9 @@ class SpamDetector:
     def analyze_transaction(
         self,
         tx: TransactionMetadata,
-        historical_transactions: List[TransactionMetadata],
-        whitelisted_addresses: Optional[Set[str]] = None,
-        monitored_address: Optional[str] = None,
+        historical_transactions: list[TransactionMetadata],
+        whitelisted_addresses: set[str] | None = None,
+        monitored_address: str | None = None,
     ) -> RiskAnalysis:
         """
         Comprehensive analysis of transaction for spam/malicious indicators
@@ -264,9 +263,9 @@ class SpamDetector:
             )
 
         score = 0
-        flags: Set[RiskFlag] = set()
+        flags: set[RiskFlag] = set()
         details = {}
-        score_breakdown: Dict[str, int] = {}
+        score_breakdown: dict[str, int] = {}
 
         # ========== FILTER 1: Value Threshold ==========
         score += self._apply_filter(
@@ -492,8 +491,8 @@ class SpamDetector:
         )
 
     def _detect_rapid_cycling(
-        self, current_tx: TransactionMetadata, historical_txs: List[TransactionMetadata]
-    ) -> Optional[int]:
+        self, current_tx: TransactionMetadata, historical_txs: list[TransactionMetadata]
+    ) -> int | None:
         """
         Detect if multiple different senders appear in rapid succession
         Indicates automated poisoning attack campaign
@@ -505,7 +504,7 @@ class SpamDetector:
         Returns:
             Number of unique senders if rapid cycling detected, None otherwise
         """
-        recent_addresses: Set[str] = set()
+        recent_addresses: set[str] = set()
         window_start = current_tx.timestamp - timedelta(
             seconds=self.config["rapid_cycling_window"]
         )
@@ -526,7 +525,7 @@ class SpamDetector:
 
     @staticmethod
     def _generate_recommendation(
-        flags: List[RiskFlag], score: int, tx: TransactionMetadata
+        flags: list[RiskFlag], score: int, tx: TransactionMetadata
     ) -> str:
         """Generate human-readable recommendation based on findings"""
 
@@ -535,22 +534,21 @@ class SpamDetector:
                 "🚨 EXTREMELY HIGH RISK - Likely address poisoning attempt. "
                 "NEVER copy this address from history. Verify on Etherscan before any action."
             )
-        elif score >= 60:
+        if score >= 60:
             return (
                 "⚠️ HIGH RISK - Suspicious address detected. "
                 "Double-check sender address on blockchain explorer before trusting."
             )
-        elif score >= 50:
+        if score >= 50:
             return (
                 "⚠️ MODERATE RISK - Some suspicious indicators detected. "
                 "Verify sender identity before interacting."
             )
-        else:
-            return "✅ Low risk - Normal transaction pattern"
+        return "✅ Low risk - Normal transaction pattern"
 
     def check_transaction_batch(
-        self, transactions: List[TransactionMetadata]
-    ) -> Dict[str, RiskAnalysis]:
+        self, transactions: list[TransactionMetadata]
+    ) -> dict[str, RiskAnalysis]:
         """
         Analyze multiple transactions, providing context
 

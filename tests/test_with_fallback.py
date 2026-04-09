@@ -1,6 +1,5 @@
 # tests/test_with_fallback.py
 """Unit tests for WithFallback and ProviderCircuitBreaker."""
-import asyncio
 import time
 from unittest.mock import AsyncMock
 
@@ -81,7 +80,7 @@ async def test_aiohttp_error_triggers_fallback():
 
 
 async def test_timeout_error_triggers_fallback():
-    primary = _make_failing_provider(asyncio.TimeoutError())
+    primary = _make_failing_provider(TimeoutError())
     fallback = _make_provider(txs=SAMPLE_TXS)
     client = WithFallback(primary=primary, fallbacks=[fallback], failure_threshold=1)
 

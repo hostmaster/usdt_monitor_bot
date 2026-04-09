@@ -9,7 +9,6 @@ Defines command handlers for the Telegram bot including /start, /help,
 import asyncio
 import logging
 import re
-from typing import Optional
 
 # Third-party
 from aiogram import Dispatcher, F, Router
@@ -26,7 +25,7 @@ ETH_ADDRESS_REGEX = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
 def is_valid_ethereum_address(
-    address: Optional[str],
+    address: str | None,
 ) -> bool:  # Allow None input type hint
     if not isinstance(address, str):  # Check type first to handle None/int etc.
         return False

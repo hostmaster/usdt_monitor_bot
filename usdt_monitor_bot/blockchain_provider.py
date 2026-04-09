@@ -1,9 +1,8 @@
 """Blockchain provider protocol, circuit breaker, and fallback chain."""
 
-import asyncio
 import logging
 import time
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import aiohttp
 
@@ -22,13 +21,13 @@ class BlockchainProvider(Protocol):
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
-    ) -> List[dict]: ...
+    ) -> list[dict]: ...
 
-    async def get_latest_block_number(self) -> Optional[int]: ...
+    async def get_latest_block_number(self) -> int | None: ...
 
     async def get_contract_creation_block(
         self, contract_address: str
-    ) -> Optional[int]: ...
+    ) -> int | None: ...
 
     async def close(self) -> None: ...
 
@@ -43,7 +42,7 @@ class ProviderCircuitBreaker:
         self._threshold = failure_threshold
         self._cooldown = cooldown_seconds
         self._consecutive_failures = 0
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
 
     def is_available(self) -> bool:
         """True if the provider should be attempted (healthy or cooldown expired)."""
@@ -88,7 +87,7 @@ class WithFallback:
     def __init__(
         self,
         primary: BlockchainProvider,
-        fallbacks: List[BlockchainProvider],
+        fallbacks: list[BlockchainProvider],
         failure_threshold: int = 3,
         cooldown_seconds: float = 300.0,
     ) -> None:
@@ -103,8 +102,10 @@ class WithFallback:
         ]
 
     async def _call_with_fallback(self, method_name: str, *args, **kwargs):
-        last_exc: Optional[Exception] = None
-        for provider, breaker in zip(self._providers, self._breakers):
+        last_exc: Exception | None = None
+        # strict=True: breakers list is built 1:1 from providers in __init__,
+        # so a length mismatch would be a real bug worth surfacing immediately.
+        for provider, breaker in zip(self._providers, self._breakers, strict=True):
             if not breaker.is_available():
                 continue
             if breaker.is_recovering():
@@ -115,12 +116,7 @@ class WithFallback:
                 result = await getattr(provider, method_name)(*args, **kwargs)
                 breaker.record_success()
                 return result
-            except (
-                EtherscanError,
-                ProviderError,
-                aiohttp.ClientError,
-                asyncio.TimeoutError,
-            ) as e:
+            except (TimeoutError, EtherscanError, ProviderError, aiohttp.ClientError) as e:
                 logging.warning(
                     f"Provider {type(provider).__name__} failed [{method_name}]: {e}"
                 )
@@ -132,17 +128,17 @@ class WithFallback:
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
-    ) -> List[dict]:
+    ) -> list[dict]:
         return await self._call_with_fallback(
             "get_token_transactions", contract_address, address, start_block
         )
 
-    async def get_latest_block_number(self) -> Optional[int]:
+    async def get_latest_block_number(self) -> int | None:
         return await self._call_with_fallback("get_latest_block_number")
 
     async def get_contract_creation_block(
         self, contract_address: str
-    ) -> Optional[int]:
+    ) -> int | None:
         return await self._call_with_fallback(
             "get_contract_creation_block", contract_address
         )

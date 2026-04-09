@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Optional
 
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
@@ -61,10 +60,10 @@ class BlockscoutClient:
 
     def __init__(self, config: BotConfig) -> None:
         self._base_url = config.blockscout_base_url
-        self._api_key: Optional[str] = config.blockscout_api_key or None
+        self._api_key: str | None = config.blockscout_api_key or None
         self._timeout = ClientTimeout(total=30)
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._connector: Optional[TCPConnector] = None
+        self._session: aiohttp.ClientSession | None = None
+        self._connector: TCPConnector | None = None
         self._session_lock = asyncio.Lock()
         self._rate_limiter = AdaptiveRateLimiter(
             initial_delay=0.2,
@@ -96,7 +95,7 @@ class BlockscoutClient:
 
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
-    ) -> List[dict]:
+    ) -> list[dict]:
         await self._ensure_session()
         await self._rate_limiter.wait()
 
@@ -134,7 +133,7 @@ class BlockscoutClient:
         except ValueError as e:
             raise BlockscoutError(f"Invalid JSON response: {e}") from e
 
-    async def get_latest_block_number(self) -> Optional[int]:
+    async def get_latest_block_number(self) -> int | None:
         await self._ensure_session()
         await self._rate_limiter.wait()
 
@@ -165,7 +164,7 @@ class BlockscoutClient:
 
     async def get_contract_creation_block(
         self, contract_address: str
-    ) -> Optional[int]:
+    ) -> int | None:
         await self._ensure_session()
         await self._rate_limiter.wait()
 
