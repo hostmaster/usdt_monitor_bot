@@ -233,6 +233,27 @@ async def test_get_contract_creation_block_returns_none_on_non_200(mock_config):
     assert result is None
 
 
+# --- get_contract_creation_blocks (bulk loops single-address) ---
+
+
+async def test_moralis_bulk_loops_single_address(mock_config):
+    """Moralis's current endpoint has no native batch; bulk method loops."""
+    addrs = ["0x" + "a" * 40, "0x" + "b" * 40]
+    client = MoralisClient(mock_config)
+    client.get_contract_creation_block = AsyncMock(side_effect=[111, 222])
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result == {addrs[0]: 111, addrs[1]: 222}
+    assert client.get_contract_creation_block.await_count == 2
+
+
+async def test_moralis_bulk_empty_input(mock_config):
+    client = MoralisClient(mock_config)
+    client.get_contract_creation_block = AsyncMock()
+    assert await client.get_contract_creation_blocks([]) == {}
+    client.get_contract_creation_block.assert_not_awaited()
+
+
 # --- close ---
 
 

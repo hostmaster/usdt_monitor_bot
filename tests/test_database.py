@@ -305,6 +305,165 @@ async def test_is_new_sender_address(memory_db_manager: DatabaseManager):
     )
 
 
+async def test_get_known_senders_empty_input(memory_db_manager: DatabaseManager):
+    """Empty input list returns empty set without touching the DB."""
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    result = await memory_db_manager.get_known_senders(monitored_addr, [])
+    assert result == set()
+
+
+async def test_get_known_senders_returns_only_seen(
+    memory_db_manager: DatabaseManager,
+):
+    """get_known_senders returns the subset of senders already in history."""
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    seen1 = "0x1111111111111111111111111111111111111111"
+    seen2 = "0x2222222222222222222222222222222222222222"
+    unseen = "0x3333333333333333333333333333333333333333"
+
+    await memory_db_manager.add_user(30, "user30", "U", "30")
+    await memory_db_manager.add_wallet(30, monitored_addr)
+
+    for tx_hash, sender in [("0xa1", seen1), ("0xa2", seen2)]:
+        await memory_db_manager.store_transaction(
+            tx_hash=tx_hash,
+            monitored_address=monitored_addr,
+            from_address=sender,
+            to_address=monitored_addr,
+            value=1.0,
+            block_number=100,
+            timestamp="2025-01-27T12:00:00+00:00",
+            token_symbol="USDT",
+        )
+
+    known = await memory_db_manager.get_known_senders(
+        monitored_addr, [seen1, seen2, unseen]
+    )
+    assert known == {seen1, seen2}
+    # "new" = input minus known
+    assert {seen1, seen2, unseen} - known == {unseen}
+
+
+async def test_get_known_senders_case_insensitive(
+    memory_db_manager: DatabaseManager,
+):
+    """Mixed-case input is matched against lowercased stored addresses."""
+    monitored_addr = "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    sender = "0x1111111111111111111111111111111111111111"
+
+    await memory_db_manager.add_user(31, "user31", "U", "31")
+    await memory_db_manager.add_wallet(31, monitored_addr)
+    await memory_db_manager.store_transaction(
+        tx_hash="0xb1",
+        monitored_address=monitored_addr,
+        from_address=sender,
+        to_address=monitored_addr,
+        value=1.0,
+        block_number=100,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+    )
+
+    # Query with uppercased monitored AND sender
+    known = await memory_db_manager.get_known_senders(
+        monitored_addr.upper(), [sender.upper()]
+    )
+    assert known == {sender.lower()}
+
+
+async def test_get_known_senders_deduplicates_input(
+    memory_db_manager: DatabaseManager,
+):
+    """Duplicates in the input list collapse to a single result entry."""
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    sender = "0x1111111111111111111111111111111111111111"
+
+    await memory_db_manager.add_user(32, "user32", "U", "32")
+    await memory_db_manager.add_wallet(32, monitored_addr)
+    await memory_db_manager.store_transaction(
+        tx_hash="0xc1",
+        monitored_address=monitored_addr,
+        from_address=sender,
+        to_address=monitored_addr,
+        value=1.0,
+        block_number=100,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+    )
+
+    known = await memory_db_manager.get_known_senders(
+        monitored_addr, [sender, sender, sender.upper()]
+    )
+    assert known == {sender}
+
+
+async def test_get_known_senders_chunking_over_limit(
+    memory_db_manager: DatabaseManager,
+):
+    """An input list larger than the chunk size still returns correct results.
+
+    Exercises the chunk loop in ``_get_known_senders_sync`` by feeding in
+    more addresses than the 500-placeholder chunk size.
+    """
+    from usdt_monitor_bot.database import DatabaseManager as _DM
+
+    monitored_addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+    await memory_db_manager.add_user(33, "user33", "U", "33")
+    await memory_db_manager.add_wallet(33, monitored_addr)
+
+    # Store 10 senders as "known".
+    known_senders = [f"0x{(0xaa00 + i):040x}" for i in range(10)]
+    for i, s in enumerate(known_senders):
+        await memory_db_manager.store_transaction(
+            tx_hash=f"0xd{i}",
+            monitored_address=monitored_addr,
+            from_address=s,
+            to_address=monitored_addr,
+            value=1.0,
+            block_number=100 + i,
+            timestamp="2025-01-27T12:00:00+00:00",
+            token_symbol="USDT",
+        )
+
+    # Build a query list with 1200 unseen senders + the 10 known ones,
+    # forcing at least 3 query chunks at the default chunk size of 500.
+    unseen = [f"0x{(0xbb0000 + i):040x}" for i in range(1200)]
+    all_query = unseen + known_senders
+    assert _DM._KNOWN_SENDERS_CHUNK_SIZE == 500
+    assert len(all_query) > 2 * _DM._KNOWN_SENDERS_CHUNK_SIZE
+
+    result = await memory_db_manager.get_known_senders(monitored_addr, all_query)
+    assert result == set(known_senders)
+
+
+async def test_get_known_senders_scopes_by_monitored_address(
+    memory_db_manager: DatabaseManager,
+):
+    """A sender known for address A must not leak into the result for address B."""
+    monitored_a = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1"
+    monitored_b = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2"
+    sender = "0x1111111111111111111111111111111111111111"
+
+    await memory_db_manager.add_user(34, "user34", "U", "34")
+    await memory_db_manager.add_wallet(34, monitored_a)
+    await memory_db_manager.add_wallet(34, monitored_b)
+    await memory_db_manager.store_transaction(
+        tx_hash="0xe1",
+        monitored_address=monitored_a,
+        from_address=sender,
+        to_address=monitored_a,
+        value=1.0,
+        block_number=100,
+        timestamp="2025-01-27T12:00:00+00:00",
+        token_symbol="USDT",
+    )
+
+    assert await memory_db_manager.get_known_senders(monitored_a, [sender]) == {
+        sender
+    }
+    assert await memory_db_manager.get_known_senders(monitored_b, [sender]) == set()
+
+
 async def test_cleanup_old_transactions(memory_db_manager: DatabaseManager):
     """Test cleanup of old transactions."""
     monitored_addr = "0xdddddddddddddddddddddddddddddddddddddddd"
@@ -392,7 +551,9 @@ async def test_database_migration_existing_db(memory_db_manager: DatabaseManager
             fetch_all=True,
         )
     )
-    assert len(indexes) == 2
+    # idx_tx_history_monitored_address + idx_tx_history_timestamp +
+    # idx_tx_history_monitored_from (added for bulk known-senders lookup).
+    assert len(indexes) == 3
 
     # Verify existing data is still intact
     wallets = await memory_db_manager.list_wallets(5)

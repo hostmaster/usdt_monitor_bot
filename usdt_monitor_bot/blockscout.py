@@ -7,7 +7,10 @@ from datetime import datetime
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
-from usdt_monitor_bot.blockchain_provider import ProviderError
+from usdt_monitor_bot.blockchain_provider import (
+    ProviderError,
+    default_get_contract_creation_blocks,
+)
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.constants import FAR_FUTURE_BLOCK, MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.etherscan import AdaptiveRateLimiter
@@ -159,6 +162,18 @@ class BlockscoutClient:
                 return block_number
         except (ValueError, TypeError):
             return None
+
+    async def get_contract_creation_blocks(
+        self, contract_addresses: list[str]
+    ) -> dict[str, int | None]:
+        """Bulk variant — no native batch endpoint on Blockscout v2 REST.
+
+        Blockscout's ``GET /api/v2/addresses/{address}`` takes the address in
+        the URL path and has no filter-by-list variant, so we fall back to
+        the default loop implementation. Expected to be a cold path because
+        Blockscout is a fallback provider.
+        """
+        return await default_get_contract_creation_blocks(self, contract_addresses)
 
     async def get_contract_creation_block(
         self, contract_address: str

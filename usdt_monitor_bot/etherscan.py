@@ -497,6 +497,146 @@ class EtherscanClient:
             logging.debug(f"Contract creation error {contract_address[:10]}...: {e}")
             return None
 
+    # Etherscan's getcontractcreation endpoint accepts a comma-separated
+    # `contractaddresses` list of up to 5 addresses per call. We chunk at this
+    # cap and issue one HTTP request per chunk.
+    _CONTRACT_CREATION_BATCH_SIZE = 5
+
+    async def get_contract_creation_blocks(
+        self, contract_addresses: list[str]
+    ) -> dict[str, int | None]:
+        """Batch variant of :meth:`get_contract_creation_block`.
+
+        Chunks the input list into groups of up to ``_CONTRACT_CREATION_BATCH_SIZE``
+        addresses, issues one ``getcontractcreation`` request per chunk, and
+        merges the results into a dict keyed by lowercased address.
+
+        Addresses absent from the API response are mapped to ``None``
+        (treated as "not a contract" or not found).
+
+        On per-chunk *transport* failure, the chunk degrades gracefully to
+        single-address calls so one bad address cannot black-hole the other
+        four. Rate-limit errors inside the chunk are propagated upward, so
+        the @retry layer around the outer call can handle them uniformly.
+
+        Args:
+            contract_addresses: Candidate contract addresses. Duplicates and
+                falsy entries are ignored.
+
+        Returns:
+            Dict mapping lowercased address -> creation block number or None.
+        """
+        if not contract_addresses:
+            return {}
+
+        # Deduplicate + lowercase, preserving order for deterministic chunking.
+        unique: list[str] = []
+        seen: set[str] = set()
+        for raw in contract_addresses:
+            if not raw:
+                continue
+            lower = raw.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
+            unique.append(lower)
+        if not unique:
+            return {}
+
+        await self._ensure_session()
+        result: dict[str, int | None] = {}
+        chunk_size = self._CONTRACT_CREATION_BATCH_SIZE
+        for i in range(0, len(unique), chunk_size):
+            chunk = unique[i : i + chunk_size]
+            try:
+                chunk_result = await self._fetch_contract_creation_chunk(chunk)
+            except (TimeoutError, aiohttp.ClientError, EtherscanError) as e:
+                # Per-chunk failure: fall back to single-address calls so one
+                # bad address in the chunk cannot poison the other four. The
+                # single-address method already swallows its own errors and
+                # returns None.
+                logging.debug(
+                    f"Batch contract-creation chunk failed ({len(chunk)} addrs): "
+                    f"{e}; falling back to per-address"
+                )
+                chunk_result = {}
+                for addr in chunk:
+                    chunk_result[addr] = await self.get_contract_creation_block(addr)
+            # Ensure every requested address in this chunk has an entry, even
+            # if the API omitted it. Absent == None.
+            for addr in chunk:
+                result.setdefault(addr, chunk_result.get(addr))
+        return result
+
+    async def _fetch_contract_creation_chunk(
+        self, chunk: list[str]
+    ) -> dict[str, int | None]:
+        """Fetch a single chunk of up to 5 contract creation records.
+
+        Returns a dict mapping lowercased address -> creation block number.
+        Missing addresses are not added to the dict (caller fills in None).
+        """
+        params = {
+            "chainid": "1",
+            "module": "contract",
+            "action": "getcontractcreation",
+            "contractaddresses": ",".join(chunk),
+            "apikey": self._api_key,
+        }
+        session = self._session
+        if session is None:
+            raise RuntimeError("HTTP session not initialized")
+
+        async def _make_request() -> dict[str, int | None]:
+            async with session.get(self._base_url, params=params) as response:
+                if response.status == 429:
+                    raise EtherscanRateLimitError("Rate limit exceeded")
+                if response.status != 200:
+                    logging.debug(
+                        f"Batch contract creation API status={response.status}"
+                    )
+                    return {}
+                data = await response.json()
+                if data.get("status") != "1":
+                    return {}
+                result_list = data.get("result", [])
+                if not isinstance(result_list, list):
+                    return {}
+                parsed: dict[str, int | None] = {}
+                for entry in result_list:
+                    if not isinstance(entry, dict):
+                        continue
+                    addr = (entry.get("contractAddress") or "").lower()
+                    if not addr:
+                        continue
+                    block_number = entry.get("blockNumber")
+                    if block_number is None:
+                        parsed[addr] = None
+                        continue
+                    try:
+                        parsed_block = int(block_number)
+                        if not (0 < parsed_block <= _MAX_VALID_BLOCK_NUMBER):
+                            logging.warning(
+                                f"Contract creation block out of range: {parsed_block}"
+                            )
+                            parsed[addr] = None
+                        else:
+                            parsed[addr] = parsed_block
+                    except (ValueError, TypeError):
+                        logging.debug(f"Invalid block number: {block_number}")
+                        parsed[addr] = None
+                return parsed
+
+        try:
+            return await self._make_request_with_rate_limiting(_make_request)
+        except EtherscanRateLimitError:
+            logging.debug(
+                f"Rate limited: batch contract creation ({len(chunk)} addrs)"
+            )
+            return {}
+        except ValueError as e:  # JSON decoding error
+            raise EtherscanError(f"Invalid JSON response: {e}") from e
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=5),

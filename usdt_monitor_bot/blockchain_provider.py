@@ -29,7 +29,46 @@ class BlockchainProvider(Protocol):
         self, contract_address: str
     ) -> int | None: ...
 
+    async def get_contract_creation_blocks(
+        self, contract_addresses: list[str]
+    ) -> dict[str, int | None]:
+        """Bulk variant of ``get_contract_creation_block``.
+
+        Returns a mapping from lowercased address to creation block number, or
+        None if the address is not a contract / lookup failed for that entry.
+        Providers that lack native batch support should inherit the default
+        loop implementation via :func:`default_get_contract_creation_blocks`.
+        """
+        ...
+
     async def close(self) -> None: ...
+
+
+async def default_get_contract_creation_blocks(
+    provider: BlockchainProvider, contract_addresses: list[str]
+) -> dict[str, int | None]:
+    """Fallback implementation for providers without a native batch endpoint.
+
+    Loops ``get_contract_creation_block`` per address. Used by Blockscout and
+    Moralis clients, whose upstream APIs only accept a single address per call.
+    Exceptions from individual lookups are swallowed and recorded as ``None``,
+    mirroring the existing per-address error handling.
+    """
+    result: dict[str, int | None] = {}
+    for raw in contract_addresses:
+        if not raw:
+            continue
+        addr = raw.lower()
+        if addr in result:
+            continue
+        try:
+            result[addr] = await provider.get_contract_creation_block(addr)
+        except (TimeoutError, EtherscanError, ProviderError, aiohttp.ClientError) as e:
+            logging.debug(
+                f"default bulk contract-creation: {addr[:10]}... failed: {e}"
+            )
+            result[addr] = None
+    return result
 
 
 class ProviderCircuitBreaker:
@@ -142,6 +181,48 @@ class WithFallback:
         return await self._call_with_fallback(
             "get_contract_creation_block", contract_address
         )
+
+    async def get_contract_creation_blocks(
+        self, contract_addresses: list[str]
+    ) -> dict[str, int | None]:
+        """Bulk variant that falls back across providers on *transport* failure.
+
+        Semantics:
+        - Calls the first available provider's batch method with the full list.
+        - A raised transport-level error (EtherscanError / ProviderError /
+          aiohttp.ClientError / TimeoutError) trips the circuit breaker and
+          fails over to the next provider, same as the single-address variant.
+        - ``None`` entries in the returned mapping are treated as *authoritative*
+          ("not a contract" / "not found") and are NOT re-queried against
+          fallbacks. Re-querying would amplify the N+1 we are eliminating,
+          because fallback providers loop per-address internally.
+        """
+        if not contract_addresses:
+            return {}
+        last_exc: Exception | None = None
+        for provider, breaker in zip(self._providers, self._breakers, strict=True):
+            if not breaker.is_available():
+                continue
+            if breaker.is_recovering():
+                logging.info(
+                    f"Provider {type(provider).__name__} attempting recovery..."
+                )
+            try:
+                result = await provider.get_contract_creation_blocks(
+                    contract_addresses
+                )
+                breaker.record_success()
+                return result
+            except (TimeoutError, EtherscanError, ProviderError, aiohttp.ClientError) as e:
+                logging.warning(
+                    f"Provider {type(provider).__name__} failed "
+                    f"[get_contract_creation_blocks]: {e}"
+                )
+                breaker.record_failure()
+                last_exc = e
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("All providers unavailable (all circuit breakers open)")
 
     async def close(self) -> None:
         for provider in self._providers:

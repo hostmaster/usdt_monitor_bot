@@ -46,6 +46,22 @@ class AddressProcessingResult:
     max_block_in_processed_batch: int  # 0 if no batch was processed
 
 
+@dataclass
+class EnrichmentContext:
+    """Pre-fetched enrichment data shared across a batch of txs for one address.
+
+    Populated once per address before the per-tx loop to eliminate the N+1
+    query pattern in spam detection. ``known_senders`` is a mutable set
+    intentionally — the per-tx loop adds newly-observed senders as it goes
+    so that the same sender appearing twice in one batch is classified as
+    "new" only on its first occurrence, matching the pre-batching semantics
+    (the old code ran ``store_transaction`` between iterations and would
+    flip the DB state mid-loop).
+    """
+
+    known_senders: set[str]
+
+
 class TransactionChecker:
     """Periodically checks for new token transactions for monitored addresses."""
 
@@ -237,29 +253,48 @@ class TransactionChecker:
         tx_metadata: TransactionMetadata,
         address_lower: str,
         historical_metadata: list[TransactionMetadata],
+        ctx: EnrichmentContext | None = None,
     ) -> RiskAnalysis:
         """
         Enrich transaction metadata with spam detection data and perform risk analysis.
+
+        When ``ctx`` is provided, sender-history and contract-age data are
+        read from the pre-fetched context / contract-creation cache instead
+        of hitting the DB and Etherscan per transaction. ``ctx`` is mutated
+        to mark the current sender as known for subsequent iterations
+        within the same batch.
 
         Args:
             tx_metadata: Transaction metadata to enrich
             address_lower: The monitored address
             historical_metadata: Historical transactions for context
+            ctx: Optional pre-fetched enrichment context (batch mode).
+                If None, falls back to per-tx DB / Etherscan lookups.
 
         Returns:
             RiskAnalysis object
         """
-        # Check if sender is new
-        is_new_sender = await self._db.is_new_sender_address(
-            address_lower, tx_metadata.from_address
-        )
-        tx_metadata.is_new_address = is_new_sender
+        sender_lower = tx_metadata.from_address.lower()
 
-        # Get contract age (with caching)
-        contract_age = await self._get_contract_age_blocks(
+        # Check if sender is new — batch path reads from the pre-fetched set,
+        # fallback path does a single-address DB lookup.
+        if ctx is not None:
+            tx_metadata.is_new_address = sender_lower not in ctx.known_senders
+            # Mark as seen so repeated senders in the same batch don't all
+            # get flagged as "new" (matches pre-batching semantics where
+            # store_transaction() ran between iterations).
+            ctx.known_senders.add(sender_lower)
+        else:
+            tx_metadata.is_new_address = await self._db.is_new_sender_address(
+                address_lower, tx_metadata.from_address
+            )
+
+        # Get contract age. Batch mode pre-populates the cache, so this is
+        # a pure in-memory lookup in the common case; cold cache falls back
+        # to the per-address path.
+        tx_metadata.contract_age_blocks = await self._get_contract_age_blocks(
             tx_metadata.from_address, tx_metadata.block_number
         )
-        tx_metadata.contract_age_blocks = contract_age
 
         # Build whitelist of trusted addresses (token contracts only)
         # The monitored address is passed separately to enable spam detection on incoming transactions
@@ -330,6 +365,7 @@ class TransactionChecker:
         user_ids: list[int],
         address_lower: str,
         historical_metadata: list[TransactionMetadata],
+        enrichment_ctx: EnrichmentContext | None = None,
     ) -> int:
         """
         Process a single transaction: analyze, store, log, and notify.
@@ -369,7 +405,10 @@ class TransactionChecker:
             tx_metadata = convert_to_transaction_metadata(tx, token_config.decimals)
             if tx_metadata:
                 risk_analysis = await self._enrich_transaction_metadata(
-                    tx_metadata, address_lower, historical_metadata
+                    tx_metadata,
+                    address_lower,
+                    historical_metadata,
+                    enrichment_ctx,
                 )
                 historical_metadata.append(tx_metadata)
 
@@ -414,6 +453,82 @@ class TransactionChecker:
                 self._remove_notification_sent(user_id, tx_hash)
         return sent_count
 
+    async def _prefetch_enrichment_context(
+        self, batch: list[dict], address_lower: str
+    ) -> EnrichmentContext:
+        """Pre-fetch sender history and contract ages for an entire batch.
+
+        Eliminates the N+1 query pattern in the per-tx spam detection loop by:
+        1. A single bulk ``get_known_senders`` DB query for all unique senders.
+        2. A batched ``get_contract_creation_blocks`` HTTP call for all
+           uncached senders, which populates ``_contract_creation_cache``.
+
+        If the contract-creation cache is too small to hold all unique
+        senders in this batch (a config smell), logs a warning and skips
+        bulk pre-fetch for contract ages — the per-tx path will fall back
+        to single-address lookups, matching pre-feature behaviour.
+        """
+        unique_senders = list(
+            {
+                (tx.get("from") or "").lower()
+                for tx in batch
+                if tx.get("from")
+            }
+        )
+
+        # 1. Bulk sender-history lookup: 1 DB roundtrip instead of N.
+        known_senders: set[str] = set()
+        if unique_senders:
+            try:
+                known_senders = await self._db.get_known_senders(
+                    address_lower, unique_senders
+                )
+            except Exception as e:
+                logging.warning(
+                    f"Bulk known-senders lookup failed for {address_lower[:8]}...: {e}",
+                    exc_info=True,
+                )
+                known_senders = set()
+
+        # 2. Bulk contract-age pre-fetch: only addresses not already cached.
+        uncached = [
+            s
+            for s in unique_senders
+            if s and s not in self._contract_creation_cache
+        ]
+        if uncached:
+            # Guard against a cache smaller than the batch's unique senders:
+            # if we pre-fetched N addresses into a cache of size < N, we would
+            # start evicting our own pre-fetched data mid-loop. Fall back to
+            # the per-tx path and flag the misconfiguration.
+            if len(uncached) > self._contract_creation_cache_max_size:
+                logging.warning(
+                    f"Skipping bulk contract-creation pre-fetch for "
+                    f"{address_lower[:8]}...: {len(uncached)} uncached senders "
+                    f"> cache size {self._contract_creation_cache_max_size}. "
+                    f"Consider raising contract_creation_cache_size."
+                )
+            else:
+                try:
+                    creation_blocks = (
+                        await self._etherscan.get_contract_creation_blocks(uncached)
+                    )
+                except Exception as e:
+                    logging.warning(
+                        f"Bulk contract-creation lookup failed for "
+                        f"{address_lower[:8]}...: {e}",
+                        exc_info=True,
+                    )
+                    creation_blocks = {}
+                # Cache every address we asked about — including explicit
+                # misses — so the next cycle does not re-query them.
+                for addr in uncached:
+                    self._cache_contract_block(
+                        addr, creation_blocks.get(addr)
+                    )
+
+        return EnrichmentContext(known_senders=known_senders)
+
     async def _send_notifications_for_batch(
         self, user_ids: list[int], batch: list[dict], address_lower: str
     ) -> None:
@@ -429,11 +544,19 @@ class TransactionChecker:
             address_lower, limit=20
         )
 
+        # Bulk pre-fetch sender-history + contract ages for the whole batch,
+        # so the per-tx loop below is a pure in-memory lookup in the common case.
+        enrichment_ctx = await self._prefetch_enrichment_context(batch, address_lower)
+
         notifications_sent = 0
         for tx in batch:
             try:
                 notifications_sent += await self._process_single_transaction(
-                    tx, user_ids, address_lower, historical_metadata
+                    tx,
+                    user_ids,
+                    address_lower,
+                    historical_metadata,
+                    enrichment_ctx,
                 )
             except Exception as e:
                 logging.error(

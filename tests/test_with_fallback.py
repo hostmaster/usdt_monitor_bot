@@ -246,3 +246,82 @@ async def test_circuit_breaker_recovery_after_cooldown():
     assert result == SAMPLE_TXS
     primary.get_token_transactions.assert_awaited_once()
     assert primary_breaker._opened_at is None  # circuit closed
+
+
+# --- get_contract_creation_blocks (bulk) ---
+
+
+async def test_bulk_primary_success_no_fallback():
+    """Primary returns data, fallback not called."""
+    primary = _make_provider()
+    primary.get_contract_creation_blocks = AsyncMock(
+        return_value={"0xa": 100, "0xb": 200}
+    )
+    fallback = _make_provider()
+    fallback.get_contract_creation_blocks = AsyncMock(return_value={})
+    client = WithFallback(primary=primary, fallbacks=[fallback])
+
+    result = await client.get_contract_creation_blocks(["0xa", "0xb"])
+    assert result == {"0xa": 100, "0xb": 200}
+    primary.get_contract_creation_blocks.assert_awaited_once()
+    fallback.get_contract_creation_blocks.assert_not_awaited()
+
+
+async def test_bulk_empty_input_returns_empty():
+    """Empty input short-circuits to empty dict without touching providers."""
+    primary = _make_provider()
+    primary.get_contract_creation_blocks = AsyncMock(return_value={"should": "skip"})
+    client = WithFallback(primary=primary, fallbacks=[])
+
+    result = await client.get_contract_creation_blocks([])
+    assert result == {}
+    primary.get_contract_creation_blocks.assert_not_awaited()
+
+
+async def test_bulk_primary_raises_falls_over_to_fallback():
+    """Transport-level error on primary triggers fallback with full address list."""
+    primary = _make_provider()
+    primary.get_contract_creation_blocks = AsyncMock(side_effect=aiohttp.ClientError("boom"))
+    fallback = _make_provider()
+    fallback.get_contract_creation_blocks = AsyncMock(return_value={"0xa": 7})
+    client = WithFallback(primary=primary, fallbacks=[fallback])
+
+    result = await client.get_contract_creation_blocks(["0xa"])
+    assert result == {"0xa": 7}
+    primary.get_contract_creation_blocks.assert_awaited_once()
+    fallback.get_contract_creation_blocks.assert_awaited_once_with(["0xa"])
+
+
+async def test_bulk_partial_none_is_authoritative_no_fallback_requery():
+    """
+    None entries in the primary's response are treated as authoritative
+    (`not a contract`) and are NOT re-queried against fallbacks \u2014 re-querying
+    would reintroduce the N+1 this feature eliminates.
+    """
+    primary = _make_provider()
+    primary.get_contract_creation_blocks = AsyncMock(
+        return_value={"0xa": 100, "0xb": None}
+    )
+    fallback = _make_provider()
+    fallback.get_contract_creation_blocks = AsyncMock(
+        return_value={"0xa": 999, "0xb": 999}
+    )
+    client = WithFallback(primary=primary, fallbacks=[fallback])
+
+    result = await client.get_contract_creation_blocks(["0xa", "0xb"])
+    assert result == {"0xa": 100, "0xb": None}
+    fallback.get_contract_creation_blocks.assert_not_awaited()
+
+
+async def test_bulk_all_providers_fail_reraises():
+    """When every provider raises, the last exception is reraised."""
+    primary = _make_provider()
+    primary.get_contract_creation_blocks = AsyncMock(side_effect=EtherscanError("a"))
+    fallback = _make_provider()
+    fallback.get_contract_creation_blocks = AsyncMock(side_effect=ProviderError("b"))
+    client = WithFallback(primary=primary, fallbacks=[fallback])
+
+    with pytest.raises(ProviderError):
+        await client.get_contract_creation_blocks(["0xa"])
+    primary.get_contract_creation_blocks.assert_awaited_once()
+    fallback.get_contract_creation_blocks.assert_awaited_once()
