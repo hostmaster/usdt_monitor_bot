@@ -23,11 +23,12 @@ from tenacity import (
 
 # Local
 from usdt_monitor_bot.config import BotConfig
+from usdt_monitor_bot.constants import FAR_FUTURE_BLOCK, MAX_VALID_BLOCK_NUMBER
 
-# Sanity cap for block numbers returned by the API.
-# Ethereum has ~22M blocks as of 2025; 10^9 gives ample headroom while
-# rejecting obviously bogus values that could corrupt checkpoint state.
-_MAX_VALID_BLOCK_NUMBER = 10**9
+# Backwards-compatible alias. The canonical constant lives in
+# usdt_monitor_bot.constants; kept here so existing imports (and tests)
+# that reference etherscan._MAX_VALID_BLOCK_NUMBER keep working.
+_MAX_VALID_BLOCK_NUMBER = MAX_VALID_BLOCK_NUMBER
 
 
 class EtherscanError(Exception):
@@ -359,7 +360,7 @@ class EtherscanClient:
             "address": address,
             "contractaddress": contract_address,
             "startblock": start_block,
-            "endblock": 99999999,  # Far future block
+            "endblock": FAR_FUTURE_BLOCK,
             "sort": "asc",
             "apikey": self._api_key,
         }
@@ -477,7 +478,7 @@ class EtherscanClient:
                 if block_number:
                     try:
                         parsed = int(block_number)
-                        if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
+                        if not (0 < parsed <= MAX_VALID_BLOCK_NUMBER):
                             logging.warning(f"Contract creation block out of range: {parsed}")
                             return None
                         return parsed
@@ -571,7 +572,7 @@ class EtherscanClient:
 
                     try:
                         block_number = int(result, 16)
-                        if not (0 < block_number <= _MAX_VALID_BLOCK_NUMBER):
+                        if not (0 < block_number <= MAX_VALID_BLOCK_NUMBER):
                             logging.warning(f"Latest block out of range: {block_number}")
                             return None
                         logging.debug(f"Latest block: {block_number}")

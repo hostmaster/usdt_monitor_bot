@@ -9,8 +9,8 @@ from aiohttp import ClientTimeout, TCPConnector
 
 from usdt_monitor_bot.blockchain_provider import ProviderError
 from usdt_monitor_bot.config import BotConfig
+from usdt_monitor_bot.constants import MAX_VALID_BLOCK_NUMBER
 
-_MAX_VALID_BLOCK_NUMBER = 10**9
 _MORALIS_BASE_URL = "https://deep-index.moralis.io/api/v2.2"
 
 
@@ -151,7 +151,7 @@ class MoralisClient:
                 if block is None:
                     return None
                 parsed = int(block)
-                if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
+                if not (0 < parsed <= MAX_VALID_BLOCK_NUMBER):
                     return None
                 return parsed
         except (TimeoutError, aiohttp.ClientError):
@@ -180,7 +180,7 @@ class MoralisClient:
                 if block_number is None:
                     return None
                 parsed = int(block_number)
-                if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
+                if not (0 < parsed <= MAX_VALID_BLOCK_NUMBER):
                     return None
                 return parsed
         except (TimeoutError, aiohttp.ClientError):
