@@ -982,6 +982,66 @@ async def test_contract_age_blocks_error_cached_as_none(
     mock_etherscan.get_contract_creation_block.assert_awaited_once()
 
 
+async def test_contract_creation_cache_lru_eviction(
+    checker: TransactionChecker,
+):
+    """Cache evicts least-recently-used entry once at capacity, not insertion order."""
+    checker._contract_creation_cache_max_size = 3
+    # Fill cache: order is [a, b, c] (a is oldest)
+    checker._cache_contract_block("0xa", 100)
+    checker._cache_contract_block("0xb", 200)
+    checker._cache_contract_block("0xc", 300)
+    assert list(checker._contract_creation_cache.keys()) == ["0xa", "0xb", "0xc"]
+
+    # Touch 0xa via _get_contract_age_blocks so it becomes most-recently-used.
+    # Order should now be [b, c, a].
+    await checker._get_contract_age_blocks("0xa", 1000)
+    assert list(checker._contract_creation_cache.keys()) == ["0xb", "0xc", "0xa"]
+
+    # Insert a 4th entry. Under LRU the oldest (b) must be evicted, NOT a.
+    checker._cache_contract_block("0xd", 400)
+    keys = list(checker._contract_creation_cache.keys())
+    assert keys == ["0xc", "0xa", "0xd"]
+    assert "0xb" not in checker._contract_creation_cache
+    assert "0xa" in checker._contract_creation_cache
+
+
+def test_contract_creation_cache_update_existing_promotes(
+    checker: TransactionChecker,
+):
+    """Updating an existing key promotes it to most-recently-used without growing size."""
+    checker._contract_creation_cache_max_size = 3
+    checker._cache_contract_block("0xa", 100)
+    checker._cache_contract_block("0xb", 200)
+    checker._cache_contract_block("0xc", 300)
+
+    # Re-cache 0xa with a new value — should move to end, not duplicate.
+    checker._cache_contract_block("0xa", 150)
+    assert list(checker._contract_creation_cache.keys()) == ["0xb", "0xc", "0xa"]
+    assert checker._contract_creation_cache["0xa"] == 150
+    assert len(checker._contract_creation_cache) == 3
+
+
+def test_contract_creation_cache_disabled_when_size_zero(
+    checker: TransactionChecker,
+):
+    """Setting max size <= 0 disables the cache; inserts are a safe no-op.
+
+    Without the guard, `popitem(last=False)` on an empty OrderedDict would
+    raise KeyError and crash the bot on the first insert.
+    """
+    checker._contract_creation_cache_max_size = 0
+    # Should not raise.
+    checker._cache_contract_block("0xa", 100)
+    checker._cache_contract_block("0xb", 200)
+    assert len(checker._contract_creation_cache) == 0
+
+    # Negative sizes behave the same.
+    checker._contract_creation_cache_max_size = -1
+    checker._cache_contract_block("0xc", 300)
+    assert len(checker._contract_creation_cache) == 0
+
+
 # --- _add_notification_sent cache eviction ---
 
 
