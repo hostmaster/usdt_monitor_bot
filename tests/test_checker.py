@@ -1050,3 +1050,334 @@ async def test_process_unknown_token_returns_zero(
     assert result == 0
     mock_notifier.send_token_notification.assert_not_awaited()
     mock_db.store_transaction.assert_not_awaited()
+
+
+# --- Batch spam-enrichment pre-fetch tests ---
+
+
+async def test_prefetch_eliminates_per_tx_sender_and_contract_calls(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """
+    End-to-end check: for a batch of N txs from M unique senders,
+    the checker makes exactly 1 bulk DB call and 1 bulk contract-creation call,
+    and **zero** single-address fallback calls.
+    """
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    # Batch mode is controlled by the presence of the bulk methods; make them
+    # return deterministic data so we can assert over the per-tx path.
+    mock_db.get_known_senders.return_value = set()
+    mock_etherscan.get_contract_creation_blocks.return_value = {
+        "0xsender0000000000000000000000000000000001": 100,
+        "0xsender0000000000000000000000000000000002": 200,
+        "0xsender0000000000000000000000000000000003": 300,
+    }
+
+    senders = [
+        "0xsender0000000000000000000000000000000001",
+        "0xsender0000000000000000000000000000000002",
+        "0xsender0000000000000000000000000000000003",
+    ]
+    batch = []
+    for i, sender in enumerate(senders):
+        tx = create_mock_tx(
+            BLOCK_ADDR1_START + 1 + i,
+            sender,
+            ADDR1,
+            USDT_CONTRACT,
+            tx_hash=f"0xbatch{i:04d}",
+        )
+        tx["token_symbol"] = "USDT"
+        batch.append(tx)
+
+    await checker._send_notifications_for_batch(
+        [USER1], batch, ADDR1.lower()
+    )
+
+    # Exactly one bulk DB call for known senders
+    mock_db.get_known_senders.assert_awaited_once()
+    bulk_args = mock_db.get_known_senders.await_args
+    assert bulk_args.args[0] == ADDR1.lower()
+    assert set(bulk_args.args[1]) == set(senders)
+
+    # Exactly one bulk contract-creation call
+    mock_etherscan.get_contract_creation_blocks.assert_awaited_once()
+    creation_args = mock_etherscan.get_contract_creation_blocks.await_args
+    assert set(creation_args.args[0]) == set(senders)
+
+    # Per-tx fallback paths must NOT have been hit
+    mock_db.is_new_sender_address.assert_not_awaited()
+    mock_etherscan.get_contract_creation_block.assert_not_awaited()
+
+    # And a notification was sent for each tx
+    assert mock_notifier.send_token_notification.await_count == 3
+
+
+async def test_prefetch_marks_all_senders_known_as_not_new(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """When every sender is already known, none of the txs should be flagged as new."""
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    # Disable contract-age lookup noise by returning all None.
+    mock_etherscan.get_contract_creation_blocks.return_value = {}
+
+    sender = "0xsender0000000000000000000000000000000099"
+    # Bulk DB reports the sender as known.
+    mock_db.get_known_senders.return_value = {sender}
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, sender, ADDR1, USDT_CONTRACT, tx_hash="0xknown01"
+    )
+    tx["token_symbol"] = "USDT"
+
+    # Spy on analyze_transaction to inspect the enriched metadata it receives.
+    captured = {}
+    real_analyze = checker._spam_detector.analyze_transaction
+
+    def _capture(metadata, *args, **kwargs):
+        captured["is_new_address"] = metadata.is_new_address
+        return real_analyze(metadata, *args, **kwargs)
+
+    checker._spam_detector.analyze_transaction = _capture  # type: ignore[method-assign]
+
+    await checker._send_notifications_for_batch(
+        [USER1], [tx], ADDR1.lower()
+    )
+
+    assert captured["is_new_address"] is False
+    mock_db.is_new_sender_address.assert_not_awaited()
+
+
+async def test_prefetch_same_sender_twice_second_is_not_new(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+):
+    """
+    If the same sender appears twice in a batch, the first tx should see it as
+    new and the second as known — matching pre-batching semantics, where
+    store_transaction() mid-loop would flip the DB state between iterations.
+    """
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.return_value = set()
+    mock_etherscan.get_contract_creation_blocks.return_value = {}
+
+    sender = "0xsender00000000000000000000000000000000ab"
+    tx1 = create_mock_tx(
+        BLOCK_ADDR1_START + 1, sender, ADDR1, USDT_CONTRACT, tx_hash="0xdup01"
+    )
+    tx1["token_symbol"] = "USDT"
+    tx2 = create_mock_tx(
+        BLOCK_ADDR1_START + 2, sender, ADDR1, USDC_CONTRACT, tx_hash="0xdup02"
+    )
+    tx2["token_symbol"] = "USDC"
+
+    # Spy on analyze_transaction to capture is_new_address per call.
+    observed: list[bool] = []
+    real_analyze = checker._spam_detector.analyze_transaction
+
+    def _capture(metadata, *args, **kwargs):
+        observed.append(metadata.is_new_address)
+        return real_analyze(metadata, *args, **kwargs)
+
+    checker._spam_detector.analyze_transaction = _capture  # type: ignore[method-assign]
+
+    await checker._send_notifications_for_batch(
+        [USER1], [tx1, tx2], ADDR1.lower()
+    )
+
+    assert observed == [True, False]
+
+
+async def test_prefetch_populates_contract_creation_cache(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+):
+    """Bulk pre-fetch populates _contract_creation_cache with both hits and misses."""
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.return_value = set()
+
+    hit_sender = "0xsender0000000000000000000000000000000501"
+    miss_sender = "0xsender0000000000000000000000000000000502"
+    mock_etherscan.get_contract_creation_blocks.return_value = {
+        hit_sender: 12345,
+        # miss_sender intentionally absent; checker should cache it as None.
+    }
+
+    tx1 = create_mock_tx(
+        BLOCK_ADDR1_START + 1, hit_sender, ADDR1, USDT_CONTRACT, tx_hash="0xcache01"
+    )
+    tx1["token_symbol"] = "USDT"
+    tx2 = create_mock_tx(
+        BLOCK_ADDR1_START + 2, miss_sender, ADDR1, USDT_CONTRACT, tx_hash="0xcache02"
+    )
+    tx2["token_symbol"] = "USDT"
+
+    await checker._send_notifications_for_batch(
+        [USER1], [tx1, tx2], ADDR1.lower()
+    )
+
+    assert checker._contract_creation_cache[hit_sender] == 12345
+    assert checker._contract_creation_cache[miss_sender] is None
+
+    # Single-address fallback must not have been invoked at any point.
+    mock_etherscan.get_contract_creation_block.assert_not_awaited()
+
+
+async def test_prefetch_skips_already_cached_senders(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+):
+    """Senders already in _contract_creation_cache are not re-queried in bulk."""
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.return_value = set()
+    mock_etherscan.get_contract_creation_blocks.return_value = {}
+
+    cached_sender = "0xsender00000000000000000000000000000006cc"
+    fresh_sender = "0xsender00000000000000000000000000000006ff"
+    # Pre-seed the cache for one of the two senders.
+    checker._contract_creation_cache[cached_sender] = 999
+
+    batch = []
+    for i, s in enumerate([cached_sender, fresh_sender]):
+        tx = create_mock_tx(
+            BLOCK_ADDR1_START + 1 + i, s, ADDR1, USDT_CONTRACT,
+            tx_hash=f"0xseeded{i}",
+        )
+        tx["token_symbol"] = "USDT"
+        batch.append(tx)
+
+    await checker._send_notifications_for_batch(
+        [USER1], batch, ADDR1.lower()
+    )
+
+    mock_etherscan.get_contract_creation_blocks.assert_awaited_once()
+    requested = mock_etherscan.get_contract_creation_blocks.await_args.args[0]
+    assert cached_sender not in requested
+    assert fresh_sender in requested
+
+
+async def test_prefetch_skips_bulk_when_cache_smaller_than_batch(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    caplog,
+):
+    """
+    If _contract_creation_cache_max_size < unique senders, pre-fetch is skipped
+    and the per-tx fallback path is used instead, with a warning logged.
+    """
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.return_value = set()
+    mock_etherscan.get_contract_creation_block.return_value = None
+
+    # Squeeze the cache so pre-fetch would overflow it.
+    checker._contract_creation_cache_max_size = 1
+
+    senders = [
+        "0xsender0000000000000000000000000000000701",
+        "0xsender0000000000000000000000000000000702",
+        "0xsender0000000000000000000000000000000703",
+    ]
+    batch = []
+    for i, s in enumerate(senders):
+        tx = create_mock_tx(
+            BLOCK_ADDR1_START + 1 + i, s, ADDR1, USDT_CONTRACT,
+            tx_hash=f"0xsmall{i:02d}",
+        )
+        tx["token_symbol"] = "USDT"
+        batch.append(tx)
+
+    with caplog.at_level(logging.WARNING):
+        await checker._send_notifications_for_batch(
+            [USER1], batch, ADDR1.lower()
+        )
+
+    # Bulk path must be skipped...
+    mock_etherscan.get_contract_creation_blocks.assert_not_awaited()
+    # ...and a warning emitted.
+    assert any("contract_creation_cache_size" in r.message for r in caplog.records)
+
+
+async def test_prefetch_continues_when_bulk_db_call_fails(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+    caplog,
+):
+    """If get_known_senders raises, pre-fetch falls back to empty set and keeps running."""
+    # Spam detection off so we don't couple this test to scoring details;
+    # the point is the pipeline survives a bulk-DB failure without crashing.
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.side_effect = Exception("boom")
+    mock_etherscan.get_contract_creation_blocks.return_value = {}
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1,
+        "0xsender00000000000000000000000000000008ff",
+        ADDR1,
+        USDT_CONTRACT,
+        tx_hash="0xfail01",
+    )
+    tx["token_symbol"] = "USDT"
+
+    with caplog.at_level(logging.WARNING):
+        await checker._send_notifications_for_batch(
+            [USER1], [tx], ADDR1.lower()
+        )
+
+    # Notification still sent despite the bulk DB failure (spam off).
+    mock_notifier.send_token_notification.assert_awaited_once()
+    # Single-address DB fallback must NOT be used — the enrichment context
+    # just treats every sender as "new" when the bulk call fails.
+    mock_db.is_new_sender_address.assert_not_awaited()
+    assert any("Bulk known-senders" in r.message for r in caplog.records)
+
+
+async def test_prefetch_continues_when_bulk_contract_call_fails(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+    caplog,
+):
+    """If get_contract_creation_blocks raises, pre-fetch logs and keeps running."""
+    checker._spam_detection_enabled = False
+    mock_db.get_recent_transactions.return_value = []
+    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db.get_known_senders.return_value = set()
+    mock_etherscan.get_contract_creation_blocks.side_effect = Exception(
+        "transport dead"
+    )
+    mock_etherscan.get_contract_creation_block.return_value = None
+
+    sender = "0xsender0000000000000000000000000000000901"
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, sender, ADDR1, USDT_CONTRACT, tx_hash="0xfail02"
+    )
+    tx["token_symbol"] = "USDT"
+
+    with caplog.at_level(logging.WARNING):
+        await checker._send_notifications_for_batch(
+            [USER1], [tx], ADDR1.lower()
+        )
+
+    mock_notifier.send_token_notification.assert_awaited_once()
+    assert any("Bulk contract-creation" in r.message for r in caplog.records)

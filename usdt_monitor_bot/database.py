@@ -201,6 +201,13 @@ class DatabaseManager:
                    ON transaction_history(monitored_address, block_number DESC)""",
             """CREATE INDEX IF NOT EXISTS idx_tx_history_timestamp
                    ON transaction_history(timestamp)""",
+            # Speeds up get_known_senders() bulk lookup: the existing
+            # (monitored_address, block_number DESC) index does not help a filter
+            # on from_address. This composite index makes the IN (...) query
+            # index-only for the bulk sender check in the spam detection path.
+            """CREATE INDEX IF NOT EXISTS idx_tx_history_monitored_from
+                   ON transaction_history(monitored_address, from_address)""",
+
             # Speeds up get_users_for_address: the existing UNIQUE(user_id, address)
             # index cannot be used for address-only lookups, forcing a full scan
             # on every checker cycle x monitored address.
@@ -521,6 +528,56 @@ class DatabaseManager:
         )
         return result is None
 
+    # Chunk size for the IN (...) placeholder list in _get_known_senders_sync.
+    # SQLite's SQLITE_MAX_VARIABLE_NUMBER is 32766 on modern builds but was 999
+    # on older builds; 500 stays comfortably below both and keeps each query
+    # cheap. +1 is for the monitored_address param itself.
+    _KNOWN_SENDERS_CHUNK_SIZE = 500
+
+    def _get_known_senders_sync(
+        self, monitored_address: str, sender_addresses: list[str]
+    ) -> set[str]:
+        """
+        Return the subset of ``sender_addresses`` already seen for
+        ``monitored_address`` in transaction_history.
+
+        Bulk replacement for per-tx ``is_new_sender_address`` calls in the
+        spam detection hot path. Input addresses are lowercased; the returned
+        set contains lowercased addresses.
+
+        Args:
+            monitored_address: The address being monitored
+            sender_addresses: Candidate sender addresses to check
+
+        Returns:
+            Set of lowercased sender addresses that already exist in history.
+            Empty set on empty input or DB error.
+        """
+        if not sender_addresses:
+            return set()
+
+        monitored_lower = monitored_address.lower()
+        # Deduplicate + lowercase first so we don't waste placeholders.
+        unique = list({s.lower() for s in sender_addresses if s})
+        if not unique:
+            return set()
+
+        known: set[str] = set()
+        chunk_size = self._KNOWN_SENDERS_CHUNK_SIZE
+        for i in range(0, len(unique), chunk_size):
+            chunk = unique[i : i + chunk_size]
+            placeholders = ",".join("?" * len(chunk))
+            query = (
+                "SELECT DISTINCT from_address FROM transaction_history "
+                f"WHERE monitored_address = ? AND from_address IN ({placeholders})"  # nosec B608
+            )
+            rows = self._execute_db_query(
+                query, (monitored_lower, *chunk), fetch_all=True
+            )
+            if rows:
+                known.update(row[0] for row in rows)
+        return known
+
     # --- Async Public Methods for Transaction History ---
     async def store_transaction(
         self,
@@ -568,6 +625,22 @@ class DatabaseManager:
         """Check if a sender address has been seen before."""
         return await self._run_sync_db_operation(
             self._is_new_sender_address_sync, monitored_address, sender_address
+        )
+
+    async def get_known_senders(
+        self, monitored_address: str, sender_addresses: list[str]
+    ) -> set[str]:
+        """Bulk variant of ``is_new_sender_address``.
+
+        Returns the subset of ``sender_addresses`` (lowercased) that already
+        appear in transaction_history for ``monitored_address``. A sender is
+        "new" iff it is in the input list but not in the returned set.
+
+        Used by the spam detection path to replace N per-tx DB roundtrips
+        with a single bulk query per batch.
+        """
+        return await self._run_sync_db_operation(
+            self._get_known_senders_sync, monitored_address, sender_addresses
         )
 
     # --- Spam Transaction Operations ---

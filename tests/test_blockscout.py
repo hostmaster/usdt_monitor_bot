@@ -211,6 +211,63 @@ async def test_get_contract_creation_block_non_200(mock_config):
     assert result is None
 
 
+# --- get_contract_creation_blocks (bulk loops single-address) ---
+
+
+async def test_get_contract_creation_blocks_loops_single_address(mock_config):
+    """Blockscout has no native batch endpoint; the bulk method must loop.
+
+    Verifies that ``get_contract_creation_blocks`` invokes the single-address
+    method once per input and merges the results into a dict keyed by
+    lowercased address.
+    """
+    addrs = [
+        "0xAa" + "0" * 38,
+        "0xBb" + "0" * 38,
+        "0xCc" + "0" * 38,
+    ]
+    client = BlockscoutClient(mock_config)
+    # Patch the single-address method so the test does not depend on HTTP.
+    client.get_contract_creation_block = AsyncMock(
+        side_effect=[100, None, 300]
+    )
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result == {
+        addrs[0].lower(): 100,
+        addrs[1].lower(): None,
+        addrs[2].lower(): 300,
+    }
+    assert client.get_contract_creation_block.await_count == 3
+
+
+async def test_get_contract_creation_blocks_deduplicates(mock_config):
+    """Duplicate addresses in the input should only be fetched once."""
+    addr = "0xabcabcabcabcabcabcabcabcabcabcabcabcabca"
+    client = BlockscoutClient(mock_config)
+    client.get_contract_creation_block = AsyncMock(return_value=42)
+
+    result = await client.get_contract_creation_blocks(
+        [addr, addr.upper(), addr]
+    )
+    assert result == {addr: 42}
+    assert client.get_contract_creation_block.await_count == 1
+
+
+async def test_get_contract_creation_blocks_swallows_per_address_errors(
+    mock_config,
+):
+    """Errors from individual lookups are swallowed and recorded as None."""
+    addrs = ["0x" + "a" * 40, "0x" + "b" * 40]
+    client = BlockscoutClient(mock_config)
+    client.get_contract_creation_block = AsyncMock(
+        side_effect=[aiohttp.ClientError("down"), 7]
+    )
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result == {addrs[0]: None, addrs[1]: 7}
+
+
 # --- API key handling ---
 
 

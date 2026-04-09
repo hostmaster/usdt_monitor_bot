@@ -7,7 +7,10 @@ from datetime import UTC, datetime
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
-from usdt_monitor_bot.blockchain_provider import ProviderError
+from usdt_monitor_bot.blockchain_provider import (
+    ProviderError,
+    default_get_contract_creation_blocks,
+)
 from usdt_monitor_bot.config import BotConfig
 
 _MAX_VALID_BLOCK_NUMBER = 10**9
@@ -158,6 +161,20 @@ class MoralisClient:
             return None
         except (ValueError, TypeError):
             return None
+
+    async def get_contract_creation_blocks(
+        self, contract_addresses: list[str]
+    ) -> dict[str, int | None]:
+        """Bulk variant — loops single-address calls.
+
+        Moralis does offer a bulk ``/erc20/metadata?addresses=...`` endpoint
+        (up to 25 per call) that returns ``block_number``, but it has a
+        different shape from the endpoint we currently use, and Moralis is
+        fallback #2 (only hit when Etherscan + Blockscout circuits are both
+        open). Out of scope for this feature — file as a follow-up if
+        Moralis ever becomes the hot path.
+        """
+        return await default_get_contract_creation_blocks(self, contract_addresses)
 
     async def get_contract_creation_block(
         self, contract_address: str

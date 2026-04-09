@@ -649,3 +649,181 @@ async def test_get_contract_creation_block_accepts_valid_block(
     )
     result = await client.get_contract_creation_block("0xcontract")
     assert result == 12345678
+
+
+# --- Batch contract creation tests ---
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_empty_input(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Empty input returns empty dict without any HTTP calls."""
+    client = etherscan_client_with_mocked_session
+    mock_aiohttp_session.get.reset_mock()
+    result = await client.get_contract_creation_blocks([])
+    assert result == {}
+    mock_aiohttp_session.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_single_chunk(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """<=5 addresses go in a single batched request; results keyed by lowercased address."""
+    client = etherscan_client_with_mocked_session
+    addrs = [
+        "0xAaa0000000000000000000000000000000000001",
+        "0xBbb0000000000000000000000000000000000002",
+        "0xCcc0000000000000000000000000000000000003",
+    ]
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={
+            "status": "1",
+            "result": [
+                {"contractAddress": addrs[0].lower(), "blockNumber": "100"},
+                {"contractAddress": addrs[1].lower(), "blockNumber": "200"},
+                {"contractAddress": addrs[2].lower(), "blockNumber": "300"},
+            ],
+        }
+    )
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(addrs)
+
+    assert result == {
+        addrs[0].lower(): 100,
+        addrs[1].lower(): 200,
+        addrs[2].lower(): 300,
+    }
+    assert mock_aiohttp_session.get.call_count == 1
+    # Confirm the API received the 3 addresses as a comma-separated list
+    call_params = mock_aiohttp_session.get.call_args.kwargs["params"]
+    assert call_params["action"] == "getcontractcreation"
+    csv = call_params["contractaddresses"]
+    assert set(csv.split(",")) == {a.lower() for a in addrs}
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_chunks_by_5(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """12 addresses result in ceil(12/5) == 3 HTTP calls."""
+    client = etherscan_client_with_mocked_session
+    addrs = [f"0x{(0xa0 + i):040x}" for i in range(12)]
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    # Return the same static payload for each chunk; the fact that addresses
+    # are missing from the response is handled (they become None), but here
+    # we just want to count HTTP calls, so return an empty result list.
+    mock_response.json = AsyncMock(return_value={"status": "1", "result": []})
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(addrs)
+
+    assert mock_aiohttp_session.get.call_count == 3
+    # All 12 addresses should be present in the result, mapped to None.
+    assert set(result.keys()) == {a.lower() for a in addrs}
+    assert all(v is None for v in result.values())
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_deduplicates_input(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Duplicate / mixed-case addresses are deduplicated before chunking."""
+    client = etherscan_client_with_mocked_session
+    addr = "0xAAAaaaAAAAAAaaaaaaAAaaAaaaaaAaAaaaaaAaAa"
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={
+            "status": "1",
+            "result": [{"contractAddress": addr.lower(), "blockNumber": "42"}],
+        }
+    )
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(
+        [addr, addr.lower(), addr.upper()]
+    )
+    assert result == {addr.lower(): 42}
+    # One input once -> one HTTP call.
+    assert mock_aiohttp_session.get.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_missing_entries_are_none(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Addresses absent from the API response are mapped to None."""
+    client = etherscan_client_with_mocked_session
+    addrs = [
+        "0x" + "a" * 40,
+        "0x" + "b" * 40,
+        "0x" + "c" * 40,
+    ]
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    # API only returns data for 2 of the 3 addresses.
+    mock_response.json = AsyncMock(
+        return_value={
+            "status": "1",
+            "result": [
+                {"contractAddress": addrs[0], "blockNumber": "1"},
+                {"contractAddress": addrs[2], "blockNumber": "3"},
+            ],
+        }
+    )
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result == {addrs[0]: 1, addrs[1]: None, addrs[2]: 3}
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_rejects_out_of_range(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Entries with a block number outside the valid range are mapped to None."""
+    client = etherscan_client_with_mocked_session
+    addrs = ["0x" + "a" * 40, "0x" + "b" * 40]
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={
+            "status": "1",
+            "result": [
+                {"contractAddress": addrs[0], "blockNumber": "100"},
+                {
+                    "contractAddress": addrs[1],
+                    "blockNumber": str(_MAX_VALID_BLOCK_NUMBER + 1),
+                },
+            ],
+        }
+    )
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result[addrs[0]] == 100
+    assert result[addrs[1]] is None
+
+
+@pytest.mark.asyncio
+async def test_get_contract_creation_blocks_api_error_returns_empty(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """status != '1' is treated as empty result and all addresses map to None."""
+    client = etherscan_client_with_mocked_session
+    addrs = ["0x" + "a" * 40, "0x" + "b" * 40]
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={"status": "0", "message": "NOTOK", "result": "rate limited"}
+    )
+    mock_aiohttp_session.get.reset_mock()
+
+    result = await client.get_contract_creation_blocks(addrs)
+    assert result == {addrs[0]: None, addrs[1]: None}
