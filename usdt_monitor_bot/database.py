@@ -71,6 +71,12 @@ class DatabaseManager:
                 self.db_path, timeout=self.timeout, check_same_thread=False
             )
             conn.execute("PRAGMA foreign_keys = ON;")
+            # WAL mode allows readers and a single writer concurrently and
+            # reduces fsync cost. journal_mode is sticky at the DB level, so
+            # subsequent connections are no-ops; synchronous=NORMAL is
+            # per-connection and safe under WAL.
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
             # Enable row factory for named column access when requested
             if use_row_factory:
                 conn.row_factory = sqlite3.Row
