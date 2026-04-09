@@ -402,11 +402,12 @@ async def test_fetch_transactions_success(
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
     mock_etherscan.get_token_transactions.side_effect = [[tx_usdt], [tx_usdc]]
 
-    result = await checker._fetch_transactions_for_address(ADDR1.lower(), 0)
+    result, all_ok = await checker._fetch_transactions_for_address(ADDR1.lower(), 0)
 
     assert len(result) == 2
     assert result[0]["token_symbol"] == "USDT"
     assert result[1]["token_symbol"] == "USDC"
+    assert all_ok is True
     assert mock_etherscan.get_token_transactions.await_count == 2
 
 
@@ -414,17 +415,77 @@ async def test_fetch_transactions_success(
 async def test_fetch_transactions_partial_failure(
     checker: TransactionChecker, mock_etherscan: AsyncMock
 ):
-    """Test `_fetch_transactions_for_address` with one token failing."""
+    """Test `_fetch_transactions_for_address` with one token failing.
+
+    The successful token's transactions are still returned, but the
+    all_ok flag is False so the caller knows not to advance the checkpoint.
+    """
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
     mock_etherscan.get_token_transactions.side_effect = [
         EtherscanRateLimitError("Rate limit on USDT"),
         [tx_usdc],
     ]
 
-    result = await checker._fetch_transactions_for_address(ADDR1.lower(), 0)
+    result, all_ok = await checker._fetch_transactions_for_address(ADDR1.lower(), 0)
 
     assert len(result) == 1
     assert result[0]["token_symbol"] == "USDC"
+    assert all_ok is False
+
+
+async def test_partial_token_failure_does_not_advance_block(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """If any token fetch fails, the address block checkpoint must NOT advance.
+
+    Otherwise the failing token's transactions in the queried block range
+    would be permanently skipped on subsequent cycles (silent data loss).
+    Regression test for review feedback on PR #187.
+    """
+    checker._spam_detection_enabled = False
+    tx_usdc = create_mock_tx(
+        BLOCK_ADDR1_START + 5, "0xsender", ADDR1, USDC_CONTRACT
+    )
+    mock_db.get_distinct_addresses.return_value = [ADDR1]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db.get_users_for_address.return_value = [USER1]
+    # USDT fetch raises (simulating transient API failure); USDC fetch succeeds.
+    mock_etherscan.get_token_transactions.side_effect = [
+        EtherscanRateLimitError("USDT blew up"),
+        [tx_usdc],
+    ]
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+
+    await checker.check_all_addresses()
+
+    # The USDC transaction may still be processed and notified,
+    # but the block checkpoint must NOT advance past the failed range.
+    mock_db.update_last_checked_block.assert_not_awaited()
+
+
+async def test_latest_block_fetched_once_per_cycle(
+    checker: TransactionChecker,
+    mock_db: AsyncMock,
+    mock_etherscan: AsyncMock,
+):
+    """get_latest_block_number is called once per cycle, not per address.
+
+    Regression test for review feedback on PR #187: the call was previously
+    made inside _process_single_address (N times per cycle). It is now
+    hoisted to check_all_addresses and reused for all addresses.
+    """
+    checker._spam_detection_enabled = False
+    mock_db.get_distinct_addresses.return_value = [ADDR1, ADDR2]
+    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan.get_token_transactions.return_value = []
+    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+
+    await checker.check_all_addresses()
+
+    assert mock_etherscan.get_latest_block_number.await_count == 1
 
 
 # --- Unit Tests for `_determine_next_block` ---
