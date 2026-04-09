@@ -104,7 +104,7 @@ class TransactionChecker:
 
     async def _fetch_transactions_for_address(
         self, address_lower: str, query_start_block: int
-    ) -> list[dict]:
+    ) -> tuple[list[dict], bool]:
         """
         Fetch all token transactions for a single address from a specific block.
 
@@ -113,17 +113,23 @@ class TransactionChecker:
             query_start_block: The block number to start checking from
 
         Returns:
-            List of transaction dictionaries from Etherscan API
+            Tuple of (transactions, all_tokens_ok). The flag is True only if
+            every token was fetched without error. If any token fetch raised,
+            the caller MUST NOT advance the address's block checkpoint
+            — otherwise transactions for the failing token in the queried
+            block range would be silently skipped on subsequent cycles.
         """
-        all_transactions = []
+        all_transactions: list[dict] = []
+        all_tokens_ok = True
         logging.debug(
             f"Fetching transactions for {address_lower} from block {query_start_block}"
         )
 
+        # Inter-request pacing is handled inside the blockchain provider's
+        # AdaptiveRateLimiter, which sleeps before every API call. Adding a
+        # manual sleep here would double-gate every request.
         for token in self._config.token_registry.get_all_tokens().values():
             try:
-                await asyncio.sleep(self._config.etherscan_request_delay / 2 or 0.1)
-
                 transactions = await self._etherscan.get_token_transactions(
                     token.contract_address,
                     address_lower,
@@ -133,9 +139,10 @@ class TransactionChecker:
                     tx["token_symbol"] = token.symbol
                 all_transactions.extend(transactions)
             except Exception as e:
+                all_tokens_ok = False
                 self._handle_etherscan_error(e, token.symbol, address_lower)
 
-        return all_transactions
+        return all_transactions, all_tokens_ok
 
     async def _get_historical_transactions_metadata(
         self, address_lower: str, limit: int = 20
@@ -595,6 +602,7 @@ class TransactionChecker:
         address_lower: str,
         stats: dict,
         update_tasks: list,
+        latest_block: int | None,
     ) -> None:
         """
         Process a single address: fetch, analyze, and update block number.
@@ -603,21 +611,20 @@ class TransactionChecker:
             address_lower: The address to process (lowercase)
             stats: Dictionary to update with statistics
             update_tasks: List to append block update tasks
+            latest_block: Latest chain block for the current cycle (shared
+                across all addresses in one cycle), or None if unavailable.
         """
         try:
-            await asyncio.sleep(self._config.etherscan_request_delay)
             start_block = await self._db.get_last_checked_block(address_lower)
 
             logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
 
-            # Fetch latest block early to cap transaction block numbers
-            latest_block = await self._etherscan.get_latest_block_number()
             if latest_block is None:
                 logging.debug(
                     f"No latest block for {address_lower[:8]}..., proceeding without cap"
                 )
 
-            raw_transactions = await self._fetch_transactions_for_address(
+            raw_transactions, all_tokens_ok = await self._fetch_transactions_for_address(
                 address_lower, start_block + 1
             )
 
@@ -632,6 +639,19 @@ class TransactionChecker:
             processed_count = result.processed_count
             max_block_in_processed_batch = result.max_block_in_processed_batch
             stats["total_transactions_processed"] += processed_count
+
+            # If any per-token fetch failed, do NOT advance the block checkpoint.
+            # Advancing would permanently skip the failing token's transactions
+            # in the queried block range on subsequent cycles. Persist processed
+            # txs (already stored by _process_address_transactions) and retry
+            # the same block range next cycle.
+            if not all_tokens_ok:
+                logging.warning(
+                    f"Partial fetch for {address_lower[:8]}...: at least one token "
+                    f"errored; not advancing block checkpoint (will retry next cycle)"
+                )
+                stats["warnings_count"] += 1
+                return
 
             # Determine next block and update if needed
             block_result = await self._block_tracker.determine_next_block(
@@ -712,8 +732,17 @@ class TransactionChecker:
         }
         update_tasks = []
 
+        # Fetch latest_block once per cycle and reuse for every address.
+        # This saves N-1 API calls per cycle (N = number of monitored addresses)
+        # since the latest chain block is the same for all of them.
+        latest_block = await self._etherscan.get_latest_block_number()
+        if latest_block is None:
+            logging.debug("No latest block for this cycle, proceeding without cap")
+
         for address in addresses_to_check:
-            await self._process_single_address(address.lower(), stats, update_tasks)
+            await self._process_single_address(
+                address.lower(), stats, update_tasks, latest_block
+            )
 
         if update_tasks:
             logging.debug(f"Updating blocks for {len(update_tasks)} addresses")
