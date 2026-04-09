@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from usdt_monitor_bot.etherscan import _MAX_VALID_BLOCK_NUMBER
+from usdt_monitor_bot.constants import MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.spam_detector_models import RiskAnalysis, TransactionMetadata
 
 
@@ -141,7 +141,7 @@ def filter_transactions(
     for tx in all_transactions:
         try:
             block_num = int(tx.get("blockNumber", 0))
-            if not (0 < block_num <= _MAX_VALID_BLOCK_NUMBER):
+            if not (0 < block_num <= MAX_VALID_BLOCK_NUMBER):
                 logging.warning(f"Block number out of range ({block_num}), skipping tx {tx.get('hash', 'N/A')[:16]}")
                 continue
             if block_num <= start_block:

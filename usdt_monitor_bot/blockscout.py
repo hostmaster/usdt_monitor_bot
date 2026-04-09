@@ -9,10 +9,8 @@ from aiohttp import ClientTimeout, TCPConnector
 
 from usdt_monitor_bot.blockchain_provider import ProviderError
 from usdt_monitor_bot.config import BotConfig
+from usdt_monitor_bot.constants import FAR_FUTURE_BLOCK, MAX_VALID_BLOCK_NUMBER
 from usdt_monitor_bot.etherscan import AdaptiveRateLimiter
-
-_MAX_VALID_BLOCK_NUMBER = 10**9
-_FAR_FUTURE_BLOCK = 99999999
 
 
 class BlockscoutError(ProviderError):
@@ -105,7 +103,7 @@ class BlockscoutClient:
             "address": address,
             "contractaddress": contract_address,
             "startblock": start_block,
-            "endblock": _FAR_FUTURE_BLOCK,
+            "endblock": FAR_FUTURE_BLOCK,
             "sort": "asc",
         }
         if self._api_key:
@@ -155,7 +153,7 @@ class BlockscoutClient:
                 if not isinstance(result, str) or not result.startswith("0x"):
                     return None
                 block_number = int(result, 16)
-                if not (0 < block_number <= _MAX_VALID_BLOCK_NUMBER):
+                if not (0 < block_number <= MAX_VALID_BLOCK_NUMBER):
                     return None
                 self._rate_limiter.on_success()
                 return block_number
@@ -186,7 +184,7 @@ class BlockscoutClient:
                 if block_number is None:
                     return None
                 parsed = int(block_number)
-                if not (0 < parsed <= _MAX_VALID_BLOCK_NUMBER):
+                if not (0 < parsed <= MAX_VALID_BLOCK_NUMBER):
                     return None
                 self._rate_limiter.on_success()
                 return parsed
