@@ -53,12 +53,6 @@ def similar_address():
     return "0x1234abcdefabcdefabcdefabcdefabcdefab7890"
 
 
-@pytest.fixture
-def different_address():
-    """Provides a completely different address."""
-    return "0x1234567890123456789012345678901234567890"
-
-
 # --- Test Address Similarity Calculation ---
 
 

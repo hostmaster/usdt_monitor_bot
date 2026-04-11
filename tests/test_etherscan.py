@@ -13,9 +13,6 @@ from usdt_monitor_bot.etherscan import (
     EtherscanRateLimitError,
 )
 
-pytestmark = pytest.mark.asyncio
-
-
 # Test data
 ADDR1 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 BLOCK_START = 1000
@@ -99,7 +96,6 @@ async def etherscan_client_with_mocked_session(
     # __aexit__ will call mock_aiohttp_session.close()
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_success(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -133,7 +129,6 @@ async def test_get_token_transactions_success(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_empty(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -156,7 +151,6 @@ async def test_get_token_transactions_empty(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_rate_limit_eventually_fails(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -202,7 +196,6 @@ async def test_get_token_transactions_rate_limit_eventually_fails(
     )  # Tenacity default attempts for the client
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_api_error_no_retry(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -229,7 +222,6 @@ async def test_get_token_transactions_api_error_no_retry(
     assert mock_session_get.call_count == 1  # Should not retry this
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_notok_error(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -262,7 +254,6 @@ async def test_get_token_transactions_notok_error(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_http_error_retried(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -282,7 +273,6 @@ async def test_get_token_transactions_http_error_retried(
     assert mock_session_get.call_count == 5
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_timeout_retried(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -302,7 +292,6 @@ async def test_get_token_transactions_timeout_retried(
     assert mock_session_get.call_count == 5
 
 
-@pytest.mark.asyncio
 async def test_get_token_transactions_unexpected_format_no_retry(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -325,7 +314,6 @@ async def test_get_token_transactions_unexpected_format_no_retry(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_retry_success_on_third_attempt_rate_limit(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -368,7 +356,6 @@ async def test_retry_success_on_third_attempt_rate_limit(
     assert result[0]["tx_id"] == "success"
 
 
-@pytest.mark.asyncio
 async def test_retry_success_on_client_error(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -401,7 +388,6 @@ async def test_retry_success_on_client_error(
     assert result[0]["tx_id"] == "net_success"
 
 
-@pytest.mark.asyncio
 async def test_get_latest_block_number_rate_limit_in_result(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -420,7 +406,6 @@ async def test_get_latest_block_number_rate_limit_in_result(
     assert "rate limit" in str(exc_info.value).lower()
 
 
-@pytest.mark.asyncio
 async def test_get_latest_block_number_success(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -439,7 +424,6 @@ async def test_get_latest_block_number_success(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_get_latest_block_number_invalid_hex(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -458,7 +442,6 @@ async def test_get_latest_block_number_invalid_hex(
     assert mock_session_get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_client_session_cleanup(mock_config, mock_aiohttp_session, monkeypatch):
     """Test that the client session is properly cleaned up."""
     # Patch aiohttp.ClientSession globally for this test to ensure our mock is used
@@ -583,7 +566,6 @@ def test_rate_limiter_does_not_reduce_below_min_delay():
 # --- _MAX_VALID_BLOCK_NUMBER validation ---
 
 
-@pytest.mark.asyncio
 async def test_get_latest_block_number_rejects_out_of_range(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -601,7 +583,6 @@ async def test_get_latest_block_number_rejects_out_of_range(
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_get_latest_block_number_accepts_valid_block(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -615,7 +596,6 @@ async def test_get_latest_block_number_accepts_valid_block(
     assert result == valid_block
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_block_rejects_out_of_range(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -633,7 +613,6 @@ async def test_get_contract_creation_block_rejects_out_of_range(
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_block_accepts_valid_block(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -654,7 +633,6 @@ async def test_get_contract_creation_block_accepts_valid_block(
 # --- Batch contract creation tests ---
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_empty_input(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -666,7 +644,6 @@ async def test_get_contract_creation_blocks_empty_input(
     mock_aiohttp_session.get.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_single_chunk(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -706,7 +683,6 @@ async def test_get_contract_creation_blocks_single_chunk(
     assert set(csv.split(",")) == {a.lower() for a in addrs}
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_chunks_by_5(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -729,7 +705,6 @@ async def test_get_contract_creation_blocks_chunks_by_5(
     assert all(v is None for v in result.values())
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_deduplicates_input(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -754,7 +729,6 @@ async def test_get_contract_creation_blocks_deduplicates_input(
     assert mock_aiohttp_session.get.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_missing_entries_are_none(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -783,7 +757,6 @@ async def test_get_contract_creation_blocks_missing_entries_are_none(
     assert result == {addrs[0]: 1, addrs[1]: None, addrs[2]: 3}
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_rejects_out_of_range(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
@@ -811,7 +784,6 @@ async def test_get_contract_creation_blocks_rejects_out_of_range(
     assert result[addrs[1]] is None
 
 
-@pytest.mark.asyncio
 async def test_get_contract_creation_blocks_api_error_returns_empty(
     etherscan_client_with_mocked_session, mock_aiohttp_session
 ):
