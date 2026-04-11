@@ -10,8 +10,6 @@ from usdt_monitor_bot.config import BotConfig, TokenConfig
 from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import RiskAnalysis, RiskFlag
 
-pytestmark = pytest.mark.asyncio
-
 # Test data
 USER1 = 123456789
 USER2 = 987654321
@@ -82,7 +80,6 @@ def notifier(mock_telegram_bot, mock_config):
     return NotificationService(mock_telegram_bot, mock_config)
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_usdt(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -99,7 +96,6 @@ async def test_send_token_notification_usdt(
     assert "View on Etherscan" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_usdc(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -125,7 +121,6 @@ async def test_send_token_notification_usdc(
     assert "View on Etherscan" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_unknown_token(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -147,7 +142,6 @@ async def test_send_token_notification_unknown_token(
     notifier._config.token_registry.get_token.assert_called_with("UNKNOWN_TOKEN")  # type: ignore[union-attr]
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_invalid_value(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -159,7 +153,6 @@ async def test_send_token_notification_invalid_value(
     mock_telegram_bot.send_message.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_invalid_timestamp(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -171,7 +164,6 @@ async def test_send_token_notification_invalid_timestamp(
     mock_telegram_bot.send_message.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_outgoing_tx(
     notifier: NotificationService,
     mock_telegram_bot,
@@ -202,7 +194,6 @@ async def test_send_token_notification_outgoing_tx(
     assert "Amount: <b>1.00 USDT</b>" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_mixed_tx(
     notifier: NotificationService,
     mock_telegram_bot,
@@ -251,7 +242,6 @@ async def test_send_token_notification_mixed_tx(
     assert "Amount: <b>2.00 USDT</b>" in outgoing_message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_self_transfer(
     notifier: NotificationService,
     mock_telegram_bot,
@@ -278,7 +268,6 @@ async def test_send_token_notification_self_transfer(
     assert "Amount: <b>1.00 USDT</b>" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_zero_value(
     notifier: NotificationService,
     mock_telegram_bot,
@@ -304,7 +293,6 @@ async def test_send_token_notification_zero_value(
     assert "Amount: <b>0.00 USDT</b>" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_large_value(
     notifier: NotificationService,
     mock_telegram_bot,
@@ -330,7 +318,6 @@ async def test_send_token_notification_large_value(
     assert "Amount: <b>1000000.00 USDT</b>" in message
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_spam_short_notice(
     notifier: NotificationService, mock_telegram_bot
 ):
@@ -369,7 +356,6 @@ async def test_send_token_notification_spam_short_notice(
 # --- Tests for Edge Cases and Error Handling ---
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_empty_tx(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
@@ -383,7 +369,6 @@ async def test_send_token_notification_empty_tx(
     assert "Empty tx data" in caplog.text
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_none_tx(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
@@ -396,7 +381,6 @@ async def test_send_token_notification_none_tx(
     mock_telegram_bot.send_message.assert_not_called()
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_invalid_user_id(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
@@ -417,7 +401,6 @@ async def test_send_token_notification_invalid_user_id(
     assert "Invalid user_id" in caplog.text
 
 
-@pytest.mark.asyncio
 async def test_send_token_notification_telegram_api_error(
     notifier: NotificationService, mock_telegram_bot, caplog
 ):
@@ -434,7 +417,6 @@ async def test_send_token_notification_telegram_api_error(
     assert "Send failed" in caplog.text
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_missing_tx_hash(notifier: NotificationService):
     """Test that missing tx_hash returns None."""
     result = notifier._format_token_message(
@@ -448,7 +430,6 @@ async def test_format_token_message_missing_tx_hash(notifier: NotificationServic
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_invalid_tx_hash_format(
     notifier: NotificationService,
 ):
@@ -464,7 +445,6 @@ async def test_format_token_message_invalid_tx_hash_format(
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_invalid_address_format(
     notifier: NotificationService,
 ):
@@ -480,7 +460,6 @@ async def test_format_token_message_invalid_address_format(
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_negative_value(notifier: NotificationService):
     """Test that negative value returns None."""
     result = notifier._format_token_message(
@@ -494,7 +473,6 @@ async def test_format_token_message_negative_value(notifier: NotificationService
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_future_timestamp(notifier: NotificationService):
     """Test that far future timestamp returns None."""
     # Timestamp 2 hours in the future (beyond allowed tolerance)
@@ -511,7 +489,6 @@ async def test_format_token_message_future_timestamp(notifier: NotificationServi
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_negative_timestamp(notifier: NotificationService):
     """Test that negative timestamp returns None."""
     result = notifier._format_token_message(
@@ -525,7 +502,6 @@ async def test_format_token_message_negative_timestamp(notifier: NotificationSer
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_format_token_message_non_integer_timestamp(
     notifier: NotificationService,
 ):
@@ -541,7 +517,6 @@ async def test_format_token_message_non_integer_timestamp(
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_send_notification_case_insensitive_address_comparison(
     notifier: NotificationService, mock_telegram_bot
 ):

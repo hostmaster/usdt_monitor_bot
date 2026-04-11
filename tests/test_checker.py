@@ -6,21 +6,16 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import pytest
 
 from usdt_monitor_bot.checker import TransactionChecker
-from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import (
-    EtherscanClient,
     EtherscanError,
     EtherscanRateLimitError,
 )
-from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import SpamDetector
 from usdt_monitor_bot.transaction_parser import (
     convert_to_transaction_metadata,
     filter_transactions,
     parse_timestamp,
 )
-
-pytestmark = pytest.mark.asyncio
 
 # --- Constants ---
 ADDR1 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -92,66 +87,50 @@ def mock_config():
 
 
 @pytest.fixture
-def mock_db():
-    """Creates a mock DatabaseManager."""
-    return AsyncMock(spec=DatabaseManager)
-
-
-@pytest.fixture
-def mock_etherscan():
-    """Creates a mock EtherscanClient."""
-    return AsyncMock(spec=EtherscanClient)
-
-
-@pytest.fixture
-def mock_notifier():
-    """Creates a mock NotificationService."""
-    return AsyncMock(spec=NotificationService)
-
-
-@pytest.fixture
-def checker(mock_config, mock_db, mock_etherscan, mock_notifier):
+def checker(mock_config, mock_db_manager, mock_etherscan_client, mock_notifier):
     """Creates a TransactionChecker with mocked dependencies."""
-    return TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    return TransactionChecker(
+        mock_config, mock_db_manager, mock_etherscan_client, mock_notifier
+    )
 
 
 # --- High-Level `check_all_addresses` Tests ---
 
 
-async def test_check_no_addresses(checker: TransactionChecker, mock_db: AsyncMock):
+async def test_check_no_addresses(checker: TransactionChecker, mock_db_manager: AsyncMock):
     """Test that the checker handles having no addresses to check."""
-    mock_db.get_distinct_addresses.return_value = []
+    mock_db_manager.get_distinct_addresses.return_value = []
 
     await checker.check_all_addresses()
 
-    mock_db.get_distinct_addresses.assert_awaited_once()
-    mock_db.get_last_checked_block.assert_not_awaited()
+    mock_db_manager.get_distinct_addresses.assert_awaited_once()
+    mock_db_manager.get_last_checked_block.assert_not_awaited()
 
 
 async def test_check_address_no_new_tx(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test checking an address with no new transactions."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_etherscan.get_token_transactions.return_value = []
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan_client.get_token_transactions.return_value = []
     # When no transactions found, we try to get latest block to advance progress
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
-    mock_db.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
+    mock_db_manager.get_last_checked_block.assert_awaited_once_with(ADDR1.lower())
     # Etherscan client is called for each token (USDT, USDC)
-    assert mock_etherscan.get_token_transactions.await_count == 2
+    assert mock_etherscan_client.get_token_transactions.await_count == 2
     # When no transactions found, we try to get latest block number
-    mock_etherscan.get_latest_block_number.assert_awaited()
+    mock_etherscan_client.get_latest_block_number.assert_awaited()
     mock_notifier.send_token_notification.assert_not_awaited()
     # The block should be updated to latest block when no transactions found
     # This prevents the bot from getting stuck checking the same block repeatedly
-    mock_db.update_last_checked_block.assert_awaited_once_with(
+    mock_db_manager.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), BLOCK_ADDR1_START + 100
     )
 
@@ -194,24 +173,24 @@ async def test_check_single_address_with_tx(
     expected_notifications: int,
     final_block: int,
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test processing new transactions (incoming, outgoing, mixed) for a single address."""
     checker._spam_detection_enabled = False
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
     # Assume all test transactions are for USDT
-    mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    mock_etherscan_client.get_token_transactions.side_effect = [transactions, []]
     # Mock latest block to be >= final_block to avoid reset logic
-    mock_etherscan.get_latest_block_number.return_value = final_block + 100
+    mock_etherscan_client.get_latest_block_number.return_value = final_block + 100
 
     await checker.check_all_addresses()
 
     assert mock_notifier.send_token_notification.await_count == expected_notifications
-    mock_db.update_last_checked_block.assert_awaited_once_with(
+    mock_db_manager.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), final_block
     )
     # Verify the last sent notification is for the last transaction
@@ -224,8 +203,8 @@ async def test_check_single_address_with_tx(
 
 async def test_check_multiple_addresses(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test that multiple addresses with different tokens are processed correctly."""
@@ -233,20 +212,20 @@ async def test_check_multiple_addresses(
     tx1 = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
     tx2 = create_mock_tx(BLOCK_ADDR1_START + 10, "0xsender", ADDR2, USDC_CONTRACT)
 
-    mock_db.get_distinct_addresses.return_value = [ADDR1, ADDR2]
-    mock_db.get_last_checked_block.side_effect = [
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1, ADDR2]
+    mock_db_manager.get_last_checked_block.side_effect = [
         BLOCK_ADDR1_START,
         BLOCK_ADDR1_START + 9,
     ]
-    mock_db.get_users_for_address.side_effect = [[USER1], [USER2]]
-    mock_etherscan.get_token_transactions.side_effect = [
+    mock_db_manager.get_users_for_address.side_effect = [[USER1], [USER2]]
+    mock_etherscan_client.get_token_transactions.side_effect = [
         [tx1],
         [],  # ADDR1: USDT tx, no USDC tx
         [],
         [tx2],  # ADDR2: no USDT tx, USDC tx
     ]
     # Mock latest block to be >= highest block to avoid reset logic
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -258,21 +237,21 @@ async def test_check_multiple_addresses(
         USER2, tx2, "USDC", ADDR2.lower(), ANY
     )
 
-    assert mock_db.update_last_checked_block.await_count == 2
-    mock_db.update_last_checked_block.assert_any_await(
+    assert mock_db_manager.update_last_checked_block.await_count == 2
+    mock_db_manager.update_last_checked_block.assert_any_await(
         ADDR1.lower(), int(tx1["blockNumber"])
     )
-    mock_db.update_last_checked_block.assert_any_await(
+    mock_db_manager.update_last_checked_block.assert_any_await(
         ADDR2.lower(), int(tx2["blockNumber"])
     )
 
 
 async def test_check_etherscan_rate_limit_skips_block_update(
-    checker: TransactionChecker, mock_db: AsyncMock, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_db_manager: AsyncMock, mock_etherscan_client: AsyncMock
 ):
     """Test that a rate-limited address is skipped and its block is not updated."""
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
     # Simulate rate limit error for all token fetches for the address
     checker._fetch_transactions_for_address = AsyncMock(  # type: ignore[assignment]
         side_effect=EtherscanRateLimitError("Rate Limited")
@@ -281,13 +260,13 @@ async def test_check_etherscan_rate_limit_skips_block_update(
     await checker.check_all_addresses()
 
     # The block should not be updated for the rate-limited address.
-    mock_db.update_last_checked_block.assert_not_awaited()
+    mock_db_manager.update_last_checked_block.assert_not_awaited()
 
 
 async def test_transaction_age_filtering(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test that transactions older than `max_transaction_age_days` are ignored."""
@@ -302,12 +281,12 @@ async def test_transaction_age_filtering(
         BLOCK_ADDR1_START + 2, "0xsender", ADDR1, USDT_CONTRACT, timestamp=old_ts
     )
 
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_etherscan.get_token_transactions.side_effect = [[recent_tx, old_tx], []]
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_etherscan_client.get_token_transactions.side_effect = [[recent_tx, old_tx], []]
     # Mock latest block to be >= highest block to avoid reset logic
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -316,15 +295,15 @@ async def test_transaction_age_filtering(
         USER1, recent_tx, "USDT", ADDR1.lower(), ANY
     )
     # The block number should be updated to the highest *seen*, even if filtered
-    mock_db.update_last_checked_block.assert_awaited_once_with(
+    mock_db_manager.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), BLOCK_ADDR1_START + 2
     )
 
 
 async def test_transaction_count_limiting(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
     mock_config: MagicMock,
 ):
@@ -337,13 +316,13 @@ async def test_transaction_count_limiting(
         for i in range(tx_count)
     ]
 
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_etherscan.get_token_transactions.side_effect = [transactions, []]
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_etherscan_client.get_token_transactions.side_effect = [transactions, []]
     # Mock latest block to be >= highest block to avoid reset logic
     latest_block = BLOCK_ADDR1_START + tx_count
-    mock_etherscan.get_latest_block_number.return_value = latest_block + 100
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block + 100
 
     await checker.check_all_addresses()
 
@@ -354,15 +333,15 @@ async def test_transaction_count_limiting(
     )
 
     # The latest block processed should be the newest of all transactions
-    mock_db.update_last_checked_block.assert_awaited_once_with(
+    mock_db_manager.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), latest_block
     )
 
 
 async def test_invalid_timestamp_is_skipped(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test that a transaction with an invalid timestamp is skipped."""
@@ -371,12 +350,12 @@ async def test_invalid_timestamp_is_skipped(
     invalid_tx = create_mock_tx(BLOCK_ADDR1_START + 2, "0xsender", ADDR1, USDT_CONTRACT)
     invalid_tx["timeStamp"] = "not-a-timestamp"
 
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_etherscan.get_token_transactions.side_effect = [[valid_tx, invalid_tx], []]
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_etherscan_client.get_token_transactions.side_effect = [[valid_tx, invalid_tx], []]
     # Mock latest block to be >= highest block to avoid reset logic
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -385,7 +364,7 @@ async def test_invalid_timestamp_is_skipped(
         USER1, valid_tx, "USDT", ADDR1.lower(), ANY
     )
     # Block should be updated to the highest block seen, even if it has invalid data and wasn't processed.
-    mock_db.update_last_checked_block.assert_awaited_once_with(
+    mock_db_manager.update_last_checked_block.assert_awaited_once_with(
         ADDR1.lower(), BLOCK_ADDR1_START + 2
     )
 
@@ -393,14 +372,13 @@ async def test_invalid_timestamp_is_skipped(
 # --- Unit Tests for Internal Methods ---
 
 
-@pytest.mark.asyncio
 async def test_fetch_transactions_success(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test `_fetch_transactions_for_address` success case."""
     tx_usdt = create_mock_tx(1, "s", "r", USDT_CONTRACT)
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
-    mock_etherscan.get_token_transactions.side_effect = [[tx_usdt], [tx_usdc]]
+    mock_etherscan_client.get_token_transactions.side_effect = [[tx_usdt], [tx_usdc]]
 
     result, all_ok = await checker._fetch_transactions_for_address(ADDR1.lower(), 0)
 
@@ -408,12 +386,11 @@ async def test_fetch_transactions_success(
     assert result[0]["token_symbol"] == "USDT"
     assert result[1]["token_symbol"] == "USDC"
     assert all_ok is True
-    assert mock_etherscan.get_token_transactions.await_count == 2
+    assert mock_etherscan_client.get_token_transactions.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_fetch_transactions_partial_failure(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test `_fetch_transactions_for_address` with one token failing.
 
@@ -421,7 +398,7 @@ async def test_fetch_transactions_partial_failure(
     all_ok flag is False so the caller knows not to advance the checkpoint.
     """
     tx_usdc = create_mock_tx(2, "s", "r", USDC_CONTRACT)
-    mock_etherscan.get_token_transactions.side_effect = [
+    mock_etherscan_client.get_token_transactions.side_effect = [
         EtherscanRateLimitError("Rate limit on USDT"),
         [tx_usdc],
     ]
@@ -435,8 +412,8 @@ async def test_fetch_transactions_partial_failure(
 
 async def test_partial_token_failure_does_not_advance_block(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """If any token fetch fails, the address block checkpoint must NOT advance.
@@ -449,27 +426,27 @@ async def test_partial_token_failure_does_not_advance_block(
     tx_usdc = create_mock_tx(
         BLOCK_ADDR1_START + 5, "0xsender", ADDR1, USDC_CONTRACT
     )
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
     # USDT fetch raises (simulating transient API failure); USDC fetch succeeds.
-    mock_etherscan.get_token_transactions.side_effect = [
+    mock_etherscan_client.get_token_transactions.side_effect = [
         EtherscanRateLimitError("USDT blew up"),
         [tx_usdc],
     ]
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
     # The USDC transaction may still be processed and notified,
     # but the block checkpoint must NOT advance past the failed range.
-    mock_db.update_last_checked_block.assert_not_awaited()
+    mock_db_manager.update_last_checked_block.assert_not_awaited()
 
 
 async def test_latest_block_fetched_once_per_cycle(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """get_latest_block_number is called once per cycle, not per address.
 
@@ -478,22 +455,21 @@ async def test_latest_block_fetched_once_per_cycle(
     hoisted to check_all_addresses and reused for all addresses.
     """
     checker._spam_detection_enabled = False
-    mock_db.get_distinct_addresses.return_value = [ADDR1, ADDR2]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_etherscan.get_token_transactions.return_value = []
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1, ADDR2]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_etherscan_client.get_token_transactions.return_value = []
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
-    assert mock_etherscan.get_latest_block_number.await_count == 1
+    assert mock_etherscan_client.get_latest_block_number.await_count == 1
 
 
 # --- Unit Tests for `_determine_next_block` ---
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_database_ahead_of_blockchain(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test that database block ahead of blockchain is reset to latest_block."""
     start_block = 1000
@@ -501,7 +477,7 @@ async def test_determine_next_block_database_ahead_of_blockchain(
     latest_block = 995  # Blockchain is behind database
     address_lower = ADDR1.lower()
 
-    mock_etherscan.get_latest_block_number.return_value = latest_block
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
@@ -509,12 +485,11 @@ async def test_determine_next_block_database_ahead_of_blockchain(
 
     assert result.final_block_number == latest_block
     assert result.resetting_to_latest is True
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_transaction_ahead_of_blockchain(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test that transaction block ahead of blockchain is capped to latest_block."""
     start_block = 1000
@@ -523,7 +498,7 @@ async def test_determine_next_block_transaction_ahead_of_blockchain(
     address_lower = ADDR1.lower()
     transactions = [create_mock_tx(1010, "0xsender", ADDR1, USDT_CONTRACT)]
 
-    mock_etherscan.get_latest_block_number.return_value = latest_block
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
@@ -531,12 +506,11 @@ async def test_determine_next_block_transaction_ahead_of_blockchain(
 
     assert result.final_block_number == latest_block
     assert result.resetting_to_latest is True
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_both_ahead_of_blockchain(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test when both start_block and new_last_block are ahead of blockchain.
 
@@ -548,7 +522,7 @@ async def test_determine_next_block_both_ahead_of_blockchain(
     address_lower = ADDR1.lower()
     transactions = [create_mock_tx(1015, "0xsender", ADDR1, USDT_CONTRACT)]
 
-    mock_etherscan.get_latest_block_number.return_value = latest_block
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
@@ -557,12 +531,11 @@ async def test_determine_next_block_both_ahead_of_blockchain(
     # Should reset to latest_block due to start_block check (first condition)
     assert result.final_block_number == latest_block
     assert result.resetting_to_latest is True
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_normal_case_no_reset(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test normal case where no reset is needed."""
     start_block = 1000
@@ -571,7 +544,7 @@ async def test_determine_next_block_normal_case_no_reset(
     address_lower = ADDR1.lower()
     transactions = [create_mock_tx(1005, "0xsender", ADDR1, USDT_CONTRACT)]
 
-    mock_etherscan.get_latest_block_number.return_value = latest_block
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
@@ -580,12 +553,11 @@ async def test_determine_next_block_normal_case_no_reset(
     # Should keep new_last_block as it's valid
     assert result.final_block_number == new_last_block
     assert result.resetting_to_latest is False
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_no_transactions_advances_to_latest(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test that when no transactions found, block advances to latest_block."""
     start_block = 1000
@@ -593,7 +565,7 @@ async def test_determine_next_block_no_transactions_advances_to_latest(
     latest_block = 1005  # Blockchain has advanced
     address_lower = ADDR1.lower()
 
-    mock_etherscan.get_latest_block_number.return_value = latest_block
+    mock_etherscan_client.get_latest_block_number.return_value = latest_block
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
@@ -602,19 +574,18 @@ async def test_determine_next_block_no_transactions_advances_to_latest(
     # Should advance to latest_block to prevent getting stuck
     assert result.final_block_number == latest_block
     assert result.resetting_to_latest is False
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_latest_block_none_guard_clause(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test guard clause when latest_block cannot be fetched (returns None)."""
     start_block = 1000
     new_last_block = 1000  # No transactions
     address_lower = ADDR1.lower()
 
-    mock_etherscan.get_latest_block_number.return_value = None
+    mock_etherscan_client.get_latest_block_number.return_value = None
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, [], address_lower
@@ -623,12 +594,11 @@ async def test_determine_next_block_latest_block_none_guard_clause(
     # Should advance to query_start_block to prevent getting stuck
     assert result.final_block_number == start_block + 1
     assert result.resetting_to_latest is False
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_determine_next_block_latest_block_none_with_transactions(
-    checker: TransactionChecker, mock_etherscan: AsyncMock
+    checker: TransactionChecker, mock_etherscan_client: AsyncMock
 ):
     """Test guard clause when latest_block is None but transactions were found."""
     start_block = 1000
@@ -636,7 +606,7 @@ async def test_determine_next_block_latest_block_none_with_transactions(
     address_lower = ADDR1.lower()
     transactions = [create_mock_tx(1005, "0xsender", ADDR1, USDT_CONTRACT)]
 
-    mock_etherscan.get_latest_block_number.return_value = None
+    mock_etherscan_client.get_latest_block_number.return_value = None
 
     result = await checker._block_tracker.determine_next_block(
         start_block, new_last_block, transactions, address_lower
@@ -645,7 +615,7 @@ async def test_determine_next_block_latest_block_none_with_transactions(
     # Should keep new_last_block since transactions were found
     assert result.final_block_number == new_last_block
     assert result.resetting_to_latest is False
-    mock_etherscan.get_latest_block_number.assert_awaited_once()
+    mock_etherscan_client.get_latest_block_number.assert_awaited_once()
 
 
 # --- Tests for Spam Detection Disabled ---
@@ -653,20 +623,20 @@ async def test_determine_next_block_latest_block_none_with_transactions(
 
 async def test_spam_detection_disabled(
     mock_config: MagicMock,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test that spam detection can be disabled."""
-    checker = TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    checker = TransactionChecker(mock_config, mock_db_manager, mock_etherscan_client, mock_notifier)
     checker._spam_detection_enabled = False
 
     tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_etherscan.get_token_transactions.side_effect = [[tx], []]
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_etherscan_client.get_token_transactions.side_effect = [[tx], []]
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     await checker.check_all_addresses()
 
@@ -679,14 +649,14 @@ async def test_spam_detection_disabled(
 
 async def test_spam_detection_with_custom_detector(
     mock_config: MagicMock,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Test that custom spam detector can be injected."""
     custom_detector = SpamDetector(config={"suspicious_score_threshold": 100})
     checker = TransactionChecker(
-        mock_config, mock_db, mock_etherscan, mock_notifier, spam_detector=custom_detector
+        mock_config, mock_db_manager, mock_etherscan_client, mock_notifier, spam_detector=custom_detector
     )
 
     assert checker._spam_detector is custom_detector
@@ -852,18 +822,18 @@ async def test_filter_transactions_excludes_at_or_below_start_block():
 
 async def test_transactions_found_but_no_users_tracking(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
     caplog,
 ):
     """Test behavior when transactions are found but no users track the address."""
     tx = create_mock_tx(BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT)
-    mock_db.get_distinct_addresses.return_value = [ADDR1]
-    mock_db.get_last_checked_block.return_value = BLOCK_ADDR1_START
-    mock_db.get_users_for_address.return_value = []  # No users tracking
-    mock_etherscan.get_token_transactions.side_effect = [[tx], []]
-    mock_etherscan.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
+    mock_db_manager.get_distinct_addresses.return_value = [ADDR1]
+    mock_db_manager.get_last_checked_block.return_value = BLOCK_ADDR1_START
+    mock_db_manager.get_users_for_address.return_value = []  # No users tracking
+    mock_etherscan_client.get_token_transactions.side_effect = [[tx], []]
+    mock_etherscan_client.get_latest_block_number.return_value = BLOCK_ADDR1_START + 100
 
     with caplog.at_level(logging.DEBUG):
         await checker.check_all_addresses()
@@ -879,12 +849,12 @@ async def test_transactions_found_but_no_users_tracking(
 
 async def test_process_transaction_missing_hash_or_symbol(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
+    mock_db_manager: AsyncMock,
     mock_notifier: AsyncMock,
     caplog,
 ):
     """Test that transactions missing hash or symbol are skipped."""
-    mock_db.get_recent_transactions.return_value = []
+    mock_db_manager.get_recent_transactions.return_value = []
 
     with caplog.at_level(logging.WARNING):
         # Missing hash
@@ -907,13 +877,13 @@ async def test_process_transaction_missing_hash_or_symbol(
 
 async def test_in_batch_dedup_same_tx_hash_one_notification_per_user(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
+    mock_db_manager: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Same tx_hash appearing twice in batch (e.g. USDT + USDC) yields one notification per user."""
     checker._spam_detection_enabled = False
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
 
     same_hash = "0xabcd1234"
     tx_usdt = create_mock_tx(
@@ -942,12 +912,12 @@ async def test_in_batch_dedup_same_tx_hash_one_notification_per_user(
 
 async def test_notification_cache_skips_duplicate_send(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
+    mock_db_manager: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """Same (user_id, tx_hash) sent again in same checker instance is skipped (cache hit)."""
     checker._spam_detection_enabled = False
-    mock_db.get_recent_transactions.return_value = []
+    mock_db_manager.get_recent_transactions.return_value = []
 
     tx = create_mock_tx(
         BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xunique99"
@@ -970,15 +940,15 @@ async def test_notification_cache_skips_duplicate_send(
 
 async def test_notification_cache_disabled_when_size_zero(
     mock_config: MagicMock,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """When notification_dedup_cache_size is 0, cache is disabled; duplicate sends are not suppressed."""
     mock_config.notification_dedup_cache_size = 0
-    checker = TransactionChecker(mock_config, mock_db, mock_etherscan, mock_notifier)
+    checker = TransactionChecker(mock_config, mock_db_manager, mock_etherscan_client, mock_notifier)
     checker._spam_detection_enabled = False
-    mock_db.get_recent_transactions.return_value = []
+    mock_db_manager.get_recent_transactions.return_value = []
 
     tx = create_mock_tx(
         BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xdup"
@@ -1001,14 +971,14 @@ async def test_notification_cache_disabled_when_size_zero(
 
 async def test_contract_age_blocks_caching(
     checker: TransactionChecker,
-    mock_etherscan: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """Test that contract creation blocks are cached."""
     contract_address = "0xcontract123"
     current_block = 1000
     creation_block = 500
 
-    mock_etherscan.get_contract_creation_block.return_value = creation_block
+    mock_etherscan_client.get_contract_creation_block.return_value = creation_block
 
     # First call - should fetch from Etherscan
     age1 = await checker._get_contract_age_blocks(contract_address, current_block)
@@ -1019,17 +989,17 @@ async def test_contract_age_blocks_caching(
     assert age2 == 600  # 1100 - 500
 
     # Etherscan should only be called once
-    mock_etherscan.get_contract_creation_block.assert_awaited_once()
+    mock_etherscan_client.get_contract_creation_block.assert_awaited_once()
 
 
 async def test_contract_age_blocks_error_cached_as_none(
     checker: TransactionChecker,
-    mock_etherscan: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """Test that errors are cached to avoid repeated failed calls."""
     contract_address = "0xcontract456"
 
-    mock_etherscan.get_contract_creation_block.side_effect = Exception("API Error")
+    mock_etherscan_client.get_contract_creation_block.side_effect = Exception("API Error")
 
     # First call - should attempt fetch and fail
     age1 = await checker._get_contract_age_blocks(contract_address, 1000)
@@ -1040,7 +1010,7 @@ async def test_contract_age_blocks_error_cached_as_none(
     assert age2 == 0
 
     # Etherscan should only be called once
-    mock_etherscan.get_contract_creation_block.assert_awaited_once()
+    mock_etherscan_client.get_contract_creation_block.assert_awaited_once()
 
 
 async def test_contract_creation_cache_lru_eviction(
@@ -1150,7 +1120,7 @@ def test_add_notification_sent_disabled_when_max_size_zero(checker: TransactionC
 
 async def test_process_unknown_token_returns_zero(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
+    mock_db_manager: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """_process_single_transaction returns 0 immediately for unknown token symbol."""
@@ -1170,7 +1140,7 @@ async def test_process_unknown_token_returns_zero(
 
     assert result == 0
     mock_notifier.send_token_notification.assert_not_awaited()
-    mock_db.store_transaction.assert_not_awaited()
+    mock_db_manager.store_transaction.assert_not_awaited()
 
 
 # --- Batch spam-enrichment pre-fetch tests ---
@@ -1178,8 +1148,8 @@ async def test_process_unknown_token_returns_zero(
 
 async def test_prefetch_eliminates_per_tx_sender_and_contract_calls(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """
@@ -1187,12 +1157,12 @@ async def test_prefetch_eliminates_per_tx_sender_and_contract_calls(
     the checker makes exactly 1 bulk DB call and 1 bulk contract-creation call,
     and **zero** single-address fallback calls.
     """
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
     # Batch mode is controlled by the presence of the bulk methods; make them
     # return deterministic data so we can assert over the per-tx path.
-    mock_db.get_known_senders.return_value = set()
-    mock_etherscan.get_contract_creation_blocks.return_value = {
+    mock_db_manager.get_known_senders.return_value = set()
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {
         "0xsender0000000000000000000000000000000001": 100,
         "0xsender0000000000000000000000000000000002": 200,
         "0xsender0000000000000000000000000000000003": 300,
@@ -1220,19 +1190,19 @@ async def test_prefetch_eliminates_per_tx_sender_and_contract_calls(
     )
 
     # Exactly one bulk DB call for known senders
-    mock_db.get_known_senders.assert_awaited_once()
-    bulk_args = mock_db.get_known_senders.await_args
+    mock_db_manager.get_known_senders.assert_awaited_once()
+    bulk_args = mock_db_manager.get_known_senders.await_args
     assert bulk_args.args[0] == ADDR1.lower()
     assert set(bulk_args.args[1]) == set(senders)
 
     # Exactly one bulk contract-creation call
-    mock_etherscan.get_contract_creation_blocks.assert_awaited_once()
-    creation_args = mock_etherscan.get_contract_creation_blocks.await_args
+    mock_etherscan_client.get_contract_creation_blocks.assert_awaited_once()
+    creation_args = mock_etherscan_client.get_contract_creation_blocks.await_args
     assert set(creation_args.args[0]) == set(senders)
 
     # Per-tx fallback paths must NOT have been hit
-    mock_db.is_new_sender_address.assert_not_awaited()
-    mock_etherscan.get_contract_creation_block.assert_not_awaited()
+    mock_db_manager.is_new_sender_address.assert_not_awaited()
+    mock_etherscan_client.get_contract_creation_block.assert_not_awaited()
 
     # And a notification was sent for each tx
     assert mock_notifier.send_token_notification.await_count == 3
@@ -1240,19 +1210,19 @@ async def test_prefetch_eliminates_per_tx_sender_and_contract_calls(
 
 async def test_prefetch_marks_all_senders_known_as_not_new(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
     """When every sender is already known, none of the txs should be flagged as new."""
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
     # Disable contract-age lookup noise by returning all None.
-    mock_etherscan.get_contract_creation_blocks.return_value = {}
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {}
 
     sender = "0xsender0000000000000000000000000000000099"
     # Bulk DB reports the sender as known.
-    mock_db.get_known_senders.return_value = {sender}
+    mock_db_manager.get_known_senders.return_value = {sender}
 
     tx = create_mock_tx(
         BLOCK_ADDR1_START + 1, sender, ADDR1, USDT_CONTRACT, tx_hash="0xknown01"
@@ -1274,23 +1244,23 @@ async def test_prefetch_marks_all_senders_known_as_not_new(
     )
 
     assert captured["is_new_address"] is False
-    mock_db.is_new_sender_address.assert_not_awaited()
+    mock_db_manager.is_new_sender_address.assert_not_awaited()
 
 
 async def test_prefetch_same_sender_twice_second_is_not_new(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """
     If the same sender appears twice in a batch, the first tx should see it as
     new and the second as known — matching pre-batching semantics, where
     store_transaction() mid-loop would flip the DB state between iterations.
     """
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.return_value = set()
-    mock_etherscan.get_contract_creation_blocks.return_value = {}
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.return_value = set()
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {}
 
     sender = "0xsender00000000000000000000000000000000ab"
     tx1 = create_mock_tx(
@@ -1321,17 +1291,17 @@ async def test_prefetch_same_sender_twice_second_is_not_new(
 
 async def test_prefetch_populates_contract_creation_cache(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """Bulk pre-fetch populates _contract_creation_cache with both hits and misses."""
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.return_value = set()
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.return_value = set()
 
     hit_sender = "0xsender0000000000000000000000000000000501"
     miss_sender = "0xsender0000000000000000000000000000000502"
-    mock_etherscan.get_contract_creation_blocks.return_value = {
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {
         hit_sender: 12345,
         # miss_sender intentionally absent; checker should cache it as None.
     }
@@ -1353,19 +1323,19 @@ async def test_prefetch_populates_contract_creation_cache(
     assert checker._contract_creation_cache[miss_sender] is None
 
     # Single-address fallback must not have been invoked at any point.
-    mock_etherscan.get_contract_creation_block.assert_not_awaited()
+    mock_etherscan_client.get_contract_creation_block.assert_not_awaited()
 
 
 async def test_prefetch_skips_already_cached_senders(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
 ):
     """Senders already in _contract_creation_cache are not re-queried in bulk."""
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.return_value = set()
-    mock_etherscan.get_contract_creation_blocks.return_value = {}
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.return_value = set()
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {}
 
     cached_sender = "0xsender00000000000000000000000000000006cc"
     fresh_sender = "0xsender00000000000000000000000000000006ff"
@@ -1385,26 +1355,26 @@ async def test_prefetch_skips_already_cached_senders(
         [USER1], batch, ADDR1.lower()
     )
 
-    mock_etherscan.get_contract_creation_blocks.assert_awaited_once()
-    requested = mock_etherscan.get_contract_creation_blocks.await_args.args[0]
+    mock_etherscan_client.get_contract_creation_blocks.assert_awaited_once()
+    requested = mock_etherscan_client.get_contract_creation_blocks.await_args.args[0]
     assert cached_sender not in requested
     assert fresh_sender in requested
 
 
 async def test_prefetch_skips_bulk_when_cache_smaller_than_batch(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     caplog,
 ):
     """
     If _contract_creation_cache_max_size < unique senders, pre-fetch is skipped
     and the per-tx fallback path is used instead, with a warning logged.
     """
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.return_value = set()
-    mock_etherscan.get_contract_creation_block.return_value = None
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.return_value = set()
+    mock_etherscan_client.get_contract_creation_block.return_value = None
 
     # Squeeze the cache so pre-fetch would overflow it.
     checker._contract_creation_cache_max_size = 1
@@ -1429,15 +1399,15 @@ async def test_prefetch_skips_bulk_when_cache_smaller_than_batch(
         )
 
     # Bulk path must be skipped...
-    mock_etherscan.get_contract_creation_blocks.assert_not_awaited()
+    mock_etherscan_client.get_contract_creation_blocks.assert_not_awaited()
     # ...and a warning emitted.
     assert any("contract_creation_cache_size" in r.message for r in caplog.records)
 
 
 async def test_prefetch_continues_when_bulk_db_call_fails(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
     caplog,
 ):
@@ -1445,10 +1415,10 @@ async def test_prefetch_continues_when_bulk_db_call_fails(
     # Spam detection off so we don't couple this test to scoring details;
     # the point is the pipeline survives a bulk-DB failure without crashing.
     checker._spam_detection_enabled = False
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.side_effect = Exception("boom")
-    mock_etherscan.get_contract_creation_blocks.return_value = {}
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.side_effect = Exception("boom")
+    mock_etherscan_client.get_contract_creation_blocks.return_value = {}
 
     tx = create_mock_tx(
         BLOCK_ADDR1_START + 1,
@@ -1468,26 +1438,26 @@ async def test_prefetch_continues_when_bulk_db_call_fails(
     mock_notifier.send_token_notification.assert_awaited_once()
     # Single-address DB fallback must NOT be used — the enrichment context
     # just treats every sender as "new" when the bulk call fails.
-    mock_db.is_new_sender_address.assert_not_awaited()
+    mock_db_manager.is_new_sender_address.assert_not_awaited()
     assert any("Bulk known-senders" in r.message for r in caplog.records)
 
 
 async def test_prefetch_continues_when_bulk_contract_call_fails(
     checker: TransactionChecker,
-    mock_db: AsyncMock,
-    mock_etherscan: AsyncMock,
+    mock_db_manager: AsyncMock,
+    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
     caplog,
 ):
     """If get_contract_creation_blocks raises, pre-fetch logs and keeps running."""
     checker._spam_detection_enabled = False
-    mock_db.get_recent_transactions.return_value = []
-    mock_db.get_users_for_address.return_value = [USER1]
-    mock_db.get_known_senders.return_value = set()
-    mock_etherscan.get_contract_creation_blocks.side_effect = Exception(
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.get_users_for_address.return_value = [USER1]
+    mock_db_manager.get_known_senders.return_value = set()
+    mock_etherscan_client.get_contract_creation_blocks.side_effect = Exception(
         "transport dead"
     )
-    mock_etherscan.get_contract_creation_block.return_value = None
+    mock_etherscan_client.get_contract_creation_block.return_value = None
 
     sender = "0xsender0000000000000000000000000000000901"
     tx = create_mock_tx(

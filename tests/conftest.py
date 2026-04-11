@@ -11,13 +11,28 @@ from aiogram import Bot
 from aiogram.filters.command import CommandObject
 from aiogram.types import Chat, Message, User
 
-from usdt_monitor_bot.checker import TransactionChecker
-
 # Import project components
 from usdt_monitor_bot.config import BotConfig
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.notifier import NotificationService
+
+
+def make_json_session_mock(json_data: dict, status: int = 200) -> MagicMock:
+    """Minimal mock aiohttp.ClientSession: get() returns JSON via async context manager."""
+    mock_response = AsyncMock(spec=aiohttp.ClientResponse)
+    mock_response.status = status
+    mock_response.json = AsyncMock(return_value=json_data)
+
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_session.get = MagicMock(return_value=mock_cm)
+    mock_session.closed = False
+    mock_session.close = AsyncMock()
+    return mock_session
 
 
 @pytest.fixture
@@ -124,22 +139,6 @@ def mock_etherscan_client() -> AsyncMock:
 def mock_notifier() -> AsyncMock:
     """Provides a mocked NotificationService."""
     return AsyncMock(spec=NotificationService)
-
-
-@pytest.fixture
-def checker(
-    mock_config: BotConfig,
-    mock_db_manager: AsyncMock,
-    mock_etherscan_client: AsyncMock,
-    mock_notifier: AsyncMock,
-) -> TransactionChecker:
-    """Provides a TransactionChecker with mocked dependencies."""
-    return TransactionChecker(
-        config=mock_config,
-        db_manager=mock_db_manager,
-        etherscan_client=mock_etherscan_client,
-        notifier=mock_notifier,
-    )
 
 
 @pytest.fixture
