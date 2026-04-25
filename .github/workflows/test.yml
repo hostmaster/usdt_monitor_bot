@@ -37,16 +37,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
-
-      - name: Cache uv pip dependencies
-        uses: actions/cache@v5
         with:
-          path: |
-            ~/.cache/uv
-            ${{ env.pythonLocation }}/lib/python*/site-packages
-          key: ${{ runner.os }}-uv-pip-3.14-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-pip-3.14-
+          enable-cache: true
 
       - name: Install dependencies
         run: |
