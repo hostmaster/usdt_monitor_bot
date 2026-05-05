@@ -5,9 +5,17 @@ on:
   pull_request:
     paths:
       - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/security.yml"
   push:
     paths:
       - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/security.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +42,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e ".[security]"
+          uv pip install --system -e ".[security,test]"
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/
