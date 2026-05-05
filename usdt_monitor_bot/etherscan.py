@@ -318,22 +318,18 @@ class EtherscanClient:
             self._rate_limiter.on_rate_limit()
             raise
 
-    @retry(
-        stop=stop_after_attempt(5),  # Attempt 5 times in total (1 initial + 4 retries)
-        wait=wait_exponential(
-            multiplier=1, min=1, max=10
-        ),  # Waits 1s, 2s, 4s, 8s (max is 10 but won't be reached with 4 retries after first failure)
-        retry=retry_if_exception_type(
-            (EtherscanRateLimitError, aiohttp.ClientError, asyncio.TimeoutError)
-        ),
-        before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
-        reraise=True,  # Reraise the last exception if all retries fail
-    )
+    # Etherscan free tier caps at 1,000 records per request (effective July 1, 2026,
+    # reduced from 10,000). We use this as our page size and paginate automatically.
+    _TOKEN_TX_PAGE_SIZE = 1000
+
     async def get_token_transactions(
         self, contract_address: str, address: str, start_block: int = 0
     ) -> list[dict]:
         """
         Get token transactions for an address from a specific block number.
+
+        Paginates automatically through all pages using a page size of
+        _TOKEN_TX_PAGE_SIZE (1,000) to stay within Etherscan's free-tier limit.
 
         The API may return duplicate transaction hashes: the same tx can appear
         in multiple token responses, or multiple transfer events for one token in
@@ -352,6 +348,49 @@ class EtherscanClient:
             EtherscanError: For other API errors
         """
         await self._ensure_session()
+        all_results: list[dict] = []
+        page = 1
+        while True:
+            page_results = await self._get_token_transactions_page(
+                contract_address, address, start_block, page
+            )
+            all_results.extend(page_results)
+            if len(page_results) < self._TOKEN_TX_PAGE_SIZE:
+                break
+            page += 1
+        return all_results
+
+    @retry(
+        stop=stop_after_attempt(5),  # Attempt 5 times in total (1 initial + 4 retries)
+        wait=wait_exponential(
+            multiplier=1, min=1, max=10
+        ),  # Waits 1s, 2s, 4s, 8s (max is 10 but won't be reached with 4 retries after first failure)
+        retry=retry_if_exception_type(
+            (EtherscanRateLimitError, aiohttp.ClientError, asyncio.TimeoutError)
+        ),
+        before_sleep=before_sleep_log(logging.getLogger(__name__), logging.INFO),
+        reraise=True,  # Reraise the last exception if all retries fail
+    )
+    async def _get_token_transactions_page(
+        self, contract_address: str, address: str, start_block: int, page: int
+    ) -> list[dict]:
+        """
+        Fetch a single page of token transactions.
+
+        Args:
+            contract_address: The token contract address
+            address: The address to check transactions for
+            start_block: The block number to start checking from
+            page: Page number (1-based)
+
+        Returns:
+            List of transaction dictionaries for this page
+
+        Raises:
+            EtherscanRateLimitError: If the API rate limit is exceeded
+            EtherscanError: For other API errors
+        """
+        await self._ensure_session()
 
         params = {
             "chainid": "1",  # Ethereum mainnet - required for V2 API
@@ -361,6 +400,8 @@ class EtherscanClient:
             "contractaddress": contract_address,
             "startblock": start_block,
             "endblock": FAR_FUTURE_BLOCK,
+            "page": page,
+            "offset": self._TOKEN_TX_PAGE_SIZE,
             "sort": "asc",
             "apikey": self._api_key,
         }
@@ -390,6 +431,12 @@ class EtherscanClient:
                     # Explicitly check for rate limit messages in the response body
                     if "rate limit" in message.lower():
                         raise EtherscanRateLimitError(message)
+
+                    # "No transactions found" is a normal terminal condition when
+                    # paginating: the previous page was exactly full but there are
+                    # no more records. Treat it as an empty page so the loop stops.
+                    if message == "No transactions found":
+                        return []
 
                     # Handle common "NOTOK" cases with more context
                     error_details = f"API error: {message}"
