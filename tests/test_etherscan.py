@@ -858,6 +858,9 @@ async def test_get_token_transactions_paginates_multiple_pages(
 
     assert len(result) == page_size + 3
     assert mock_aiohttp_session.get.call_count == 2
+    calls = mock_aiohttp_session.get.call_args_list
+    assert calls[0].kwargs["params"]["page"] == 1
+    assert calls[1].kwargs["params"]["page"] == 2
 
 
 async def test_get_token_transactions_no_transactions_found_on_second_page(
@@ -889,6 +892,9 @@ async def test_get_token_transactions_no_transactions_found_on_second_page(
 
     assert len(result) == page_size
     assert mock_aiohttp_session.get.call_count == 2
+    calls = mock_aiohttp_session.get.call_args_list
+    assert calls[0].kwargs["params"]["page"] == 1
+    assert calls[1].kwargs["params"]["page"] == 2
 
 
 async def test_get_token_transactions_page_and_offset_params_sent(
