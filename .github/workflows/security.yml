@@ -41,7 +41,10 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
+        # Upgrade pip to >=26.1 to address CVE-2026-3219 in the runner's
+        # bundled pip (flagged by pip-audit below).
         run: |
+          uv pip install --system --upgrade 'pip>=26.1'
           uv pip install --system -e ".[security,test]"
       - name: Run Bandit
         run: |
