@@ -5,9 +5,17 @@ on:
   pull_request:
     paths:
       - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/security.yml"
   push:
     paths:
       - "**.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/security.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
   workflow_dispatch:
 
 concurrency:
@@ -33,8 +41,11 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
+        # Upgrade pip to >=26.1 to address CVE-2026-3219 in the runner's
+        # bundled pip (flagged by pip-audit below).
         run: |
-          uv pip install --system -e ".[security]"
+          uv pip install --system --upgrade 'pip>=26.1'
+          uv pip install --system -e ".[security,test]"
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/

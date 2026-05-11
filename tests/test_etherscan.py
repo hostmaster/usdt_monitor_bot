@@ -799,3 +799,119 @@ async def test_get_contract_creation_blocks_api_error_returns_empty(
 
     result = await client.get_contract_creation_blocks(addrs)
     assert result == {addrs[0]: None, addrs[1]: None}
+
+
+# --- Pagination tests for get_token_transactions ---
+
+
+async def test_get_token_transactions_single_page(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """A response with fewer than PAGE_SIZE records stops after one request."""
+    client = etherscan_client_with_mocked_session
+    mock_session_get = mock_aiohttp_session.get
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={
+            "status": "1",
+            "message": "OK",
+            "result": [{"hash": f"0x{i}"} for i in range(5)],
+        }
+    )
+
+    result = await client.get_token_transactions("0xcontract", "0xaddress", 0)
+
+    assert len(result) == 5
+    assert mock_session_get.call_count == 1
+
+
+async def test_get_token_transactions_paginates_multiple_pages(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """When page 1 returns PAGE_SIZE records, a second page is fetched."""
+    client = etherscan_client_with_mocked_session
+    page_size = client._TOKEN_TX_PAGE_SIZE
+
+    full_page = [{"hash": f"0x{i}"} for i in range(page_size)]
+    partial_page = [{"hash": f"0xlast{i}"} for i in range(3)]
+
+    # page 1: full page → trigger pagination; page 2: partial → stop
+    response1_ctx = AsyncMock()
+    response1 = AsyncMock(status=200)
+    response1.json = AsyncMock(
+        return_value={"status": "1", "message": "OK", "result": full_page}
+    )
+    response1_ctx.__aenter__.return_value = response1
+
+    response2_ctx = AsyncMock()
+    response2 = AsyncMock(status=200)
+    response2.json = AsyncMock(
+        return_value={"status": "1", "message": "OK", "result": partial_page}
+    )
+    response2_ctx.__aenter__.return_value = response2
+
+    mock_aiohttp_session.get.side_effect = [response1_ctx, response2_ctx]
+
+    result = await client.get_token_transactions("0xcontract", "0xaddress", 0)
+
+    assert len(result) == page_size + 3
+    assert mock_aiohttp_session.get.call_count == 2
+    calls = mock_aiohttp_session.get.call_args_list
+    assert calls[0].kwargs["params"]["page"] == 1
+    assert calls[1].kwargs["params"]["page"] == 2
+
+
+async def test_get_token_transactions_no_transactions_found_on_second_page(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """'No transactions found' on page 2 (status=0) is treated as empty and stops pagination."""
+    client = etherscan_client_with_mocked_session
+    page_size = client._TOKEN_TX_PAGE_SIZE
+
+    full_page = [{"hash": f"0x{i}"} for i in range(page_size)]
+
+    response1_ctx = AsyncMock()
+    response1 = AsyncMock(status=200)
+    response1.json = AsyncMock(
+        return_value={"status": "1", "message": "OK", "result": full_page}
+    )
+    response1_ctx.__aenter__.return_value = response1
+
+    response2_ctx = AsyncMock()
+    response2 = AsyncMock(status=200)
+    response2.json = AsyncMock(
+        return_value={"status": "0", "message": "No transactions found", "result": []}
+    )
+    response2_ctx.__aenter__.return_value = response2
+
+    mock_aiohttp_session.get.side_effect = [response1_ctx, response2_ctx]
+
+    result = await client.get_token_transactions("0xcontract", "0xaddress", 0)
+
+    assert len(result) == page_size
+    assert mock_aiohttp_session.get.call_count == 2
+    calls = mock_aiohttp_session.get.call_args_list
+    assert calls[0].kwargs["params"]["page"] == 1
+    assert calls[1].kwargs["params"]["page"] == 2
+
+
+async def test_get_token_transactions_page_and_offset_params_sent(
+    etherscan_client_with_mocked_session, mock_aiohttp_session
+):
+    """Verify that page and offset query params are included in the request."""
+    client = etherscan_client_with_mocked_session
+
+    mock_response = mock_aiohttp_session.get.return_value.__aenter__.return_value
+    mock_response.status = 200
+    mock_response.json = AsyncMock(
+        return_value={"status": "1", "message": "OK", "result": []}
+    )
+
+    await client.get_token_transactions("0xcontract", "0xaddress", 0)
+
+    call_kwargs = mock_aiohttp_session.get.call_args
+    params = call_kwargs[1]["params"] if call_kwargs[1] else call_kwargs[0][1]
+    assert params["page"] == 1
+    assert params["offset"] == client._TOKEN_TX_PAGE_SIZE
