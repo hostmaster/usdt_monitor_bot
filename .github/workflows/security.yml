@@ -43,9 +43,11 @@ jobs:
       - name: Install dependencies
         # Upgrade pip to >=26.1 to address CVE-2026-3219 in the runner's
         # bundled pip (flagged by pip-audit below).
+        # Install from the locked uv.lock so pip-audit audits what ships in
+        # production, not a freshly-resolved set of transitive dependencies.
         run: |
           uv pip install --system --upgrade 'pip>=26.1'
-          uv pip install --system -e ".[security,test]"
+          uv pip install --system --frozen -r <(uv export --frozen --extra security --extra test)
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/

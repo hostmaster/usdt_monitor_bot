@@ -1,21 +1,21 @@
-FROM python:3.14-alpine
+FROM python:3.14.3-alpine3.22
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv (pinned to minor version; Renovate will bump the digest)
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy dependency files and source code for installation
-COPY pyproject.toml .
+# Copy lockfile + manifest so the install is fully reproducible
+COPY pyproject.toml uv.lock ./
 COPY usdt_monitor_bot/ usdt_monitor_bot/
-# Install dependencies directly from pyproject.toml
+# Install exact versions from uv.lock (--frozen aborts if lock is stale)
 # Using BuildKit cache mount to persist uv's cache between builds
 # This cache persists across builds in CI/CD, significantly speeding up dependency installation
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system .
+    uv pip install --system --no-cache -r <(uv export --frozen --no-dev)
 
 WORKDIR /app
 
