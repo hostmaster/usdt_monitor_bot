@@ -32,7 +32,7 @@ class UserRateLimitMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        if not isinstance(event, Message):
+        if not isinstance(event, Message) or not (event.text and event.text.startswith("/")):
             return await handler(event, data)
 
         user_id = event.from_user.id if event.from_user else None
@@ -45,6 +45,11 @@ class UserRateLimitMiddleware(BaseMiddleware):
         # Evict timestamps that have fallen outside the window
         while timestamps and now - timestamps[0] > self._window:
             timestamps.popleft()
+
+        # If the deque is now empty, clean up the key and let the call through
+        if not timestamps:
+            del self._user_timestamps[user_id]
+            timestamps = self._user_timestamps[user_id]  # fresh deque via defaultdict
 
         if len(timestamps) >= self._max_calls:
             await event.answer(
