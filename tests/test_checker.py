@@ -59,7 +59,6 @@ def mock_config():
     config.etherscan_request_delay = 0
     config.max_transaction_age_days = 7
     config.max_transactions_per_check = 10
-    config.notification_dedup_cache_size = 10_000
     config.contract_creation_cache_size = 1_000
 
     token_registry = MagicMock()
@@ -910,14 +909,16 @@ async def test_in_batch_dedup_same_tx_hash_one_notification_per_user(
     assert call_args[1].get("hash") == same_hash
 
 
-async def test_notification_cache_skips_duplicate_send(
+async def test_notification_dedup_skips_duplicate_send(
     checker: TransactionChecker,
     mock_db_manager: AsyncMock,
     mock_notifier: AsyncMock,
 ):
-    """Same (user_id, tx_hash) sent again in same checker instance is skipped (cache hit)."""
+    """Same (user_id, tx_hash) sent again is skipped when mark_notification_sent returns False."""
     checker._spam_detection_enabled = False
     mock_db_manager.get_recent_transactions.return_value = []
+    # First call: newly inserted (True). Second call: already exists (False).
+    mock_db_manager.mark_notification_sent.side_effect = [True, False]
 
     tx = create_mock_tx(
         BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xunique99"
@@ -934,36 +935,30 @@ async def test_notification_cache_skips_duplicate_send(
         tx, [USER1], ADDR1.lower(), []
     )
     assert result2 == 0
-    # Still only one call total (second send skipped by cache)
+    # Still only one call total (second send suppressed by DB dedup)
     mock_notifier.send_token_notification.assert_awaited_once()
 
 
-async def test_notification_cache_disabled_when_size_zero(
-    mock_config: MagicMock,
+async def test_notification_dedup_allows_send_when_new(
+    checker: TransactionChecker,
     mock_db_manager: AsyncMock,
-    mock_etherscan_client: AsyncMock,
     mock_notifier: AsyncMock,
 ):
-    """When notification_dedup_cache_size is 0, cache is disabled; duplicate sends are not suppressed."""
-    mock_config.notification_dedup_cache_size = 0
-    checker = TransactionChecker(mock_config, mock_db_manager, mock_etherscan_client, mock_notifier)
+    """Notification is sent when mark_notification_sent returns True (first time)."""
     checker._spam_detection_enabled = False
     mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.mark_notification_sent.return_value = True
 
     tx = create_mock_tx(
-        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xdup"
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xnew_tx"
     )
     tx["token_symbol"] = "USDT"
 
-    result1 = await checker._process_single_transaction(
+    result = await checker._process_single_transaction(
         tx, [USER1], ADDR1.lower(), []
     )
-    result2 = await checker._process_single_transaction(
-        tx, [USER1], ADDR1.lower(), []
-    )
-    assert result1 == 1
-    assert result2 == 1
-    assert mock_notifier.send_token_notification.await_count == 2
+    assert result == 1
+    mock_notifier.send_token_notification.assert_awaited_once()
 
 
 # --- Tests for Contract Age Caching ---
@@ -1073,46 +1068,58 @@ def test_contract_creation_cache_disabled_when_size_zero(
     assert len(checker._contract_creation_cache) == 0
 
 
-# --- _add_notification_sent cache eviction ---
+# --- DB notification deduplication ---
 
 
-def test_add_notification_sent_basic(checker: TransactionChecker):
-    """Key is added to cache after first call."""
-    checker._notification_dedup_max_size = 5
-    checker._add_notification_sent(1, "0xtxhash")
-    assert (1, "0xtxhash") in checker._notification_sent_cache
+async def test_db_mark_notification_sent_first_insert(memory_db_manager):
+    """mark_notification_sent returns True on first insert."""
+    result = await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    assert result is True
 
 
-def test_add_notification_sent_duplicate_no_double_add(checker: TransactionChecker):
-    """Adding same key twice does not grow the deque."""
-    checker._notification_dedup_max_size = 5
-    checker._add_notification_sent(1, "0xtxhash")
-    checker._add_notification_sent(1, "0xtxhash")
-    assert len(checker._notification_sent_order) == 1
+async def test_db_mark_notification_sent_duplicate(memory_db_manager):
+    """mark_notification_sent returns False for a duplicate (user_id, tx_hash)."""
+    await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    result = await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    assert result is False
 
 
-def test_add_notification_sent_evicts_oldest_at_capacity(checker: TransactionChecker):
-    """When cache is full, oldest entry is evicted to make room."""
-    checker._notification_dedup_max_size = 3
-    checker._notification_sent_cache.clear()
-    checker._notification_sent_order.clear()
-
-    for i in range(3):
-        checker._add_notification_sent(i, f"0xtx{i}")
-
-    # Cache is now full; adding a 4th should evict (0, "0xtx0")
-    checker._add_notification_sent(99, "0xtxnew")
-
-    assert (0, "0xtx0") not in checker._notification_sent_cache
-    assert (99, "0xtxnew") in checker._notification_sent_cache
-    assert len(checker._notification_sent_cache) == 3
+async def test_db_mark_notification_sent_different_users(memory_db_manager):
+    """Different user_ids for the same tx_hash are independent records."""
+    r1 = await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    r2 = await memory_db_manager.mark_notification_sent(2, "0xtxhash")
+    assert r1 is True
+    assert r2 is True
 
 
-def test_add_notification_sent_disabled_when_max_size_zero(checker: TransactionChecker):
-    """Cache is a no-op when max_size <= 0."""
-    checker._notification_dedup_max_size = 0
-    checker._add_notification_sent(1, "0xtxhash")
-    assert (1, "0xtxhash") not in checker._notification_sent_cache
+async def test_db_is_notification_sent(memory_db_manager):
+    """is_notification_sent returns False before insert, True after."""
+    assert await memory_db_manager.is_notification_sent(1, "0xtxhash") is False
+    await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    assert await memory_db_manager.is_notification_sent(1, "0xtxhash") is True
+
+
+async def test_db_cleanup_old_notifications(memory_db_manager):
+    """cleanup_old_notifications removes entries older than the cutoff."""
+    import sqlite3
+
+    # Insert a record with an old sent_at timestamp directly
+    conn = sqlite3.connect(memory_db_manager.db_path)
+    conn.execute(
+        "INSERT INTO notification_sent (user_id, tx_hash, sent_at) VALUES (?, ?, ?)",
+        (1, "0xold", "2000-01-01T00:00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    # Insert a fresh record via the normal path
+    await memory_db_manager.mark_notification_sent(2, "0xrecent")
+
+    deleted = await memory_db_manager.cleanup_old_notifications(days=90)
+    assert deleted == 1
+    # Recent record must survive
+    assert await memory_db_manager.is_notification_sent(2, "0xrecent") is True
+    assert await memory_db_manager.is_notification_sent(1, "0xold") is False
 
 
 # --- Unknown token early return ---
