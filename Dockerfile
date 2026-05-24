@@ -15,7 +15,8 @@ COPY usdt_monitor_bot/ usdt_monitor_bot/
 # Using BuildKit cache mount to persist uv's cache between builds
 # This cache persists across builds in CI/CD, significantly speeding up dependency installation
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-cache -r <(uv export --frozen --no-dev)
+    uv export --frozen --no-dev -o /tmp/requirements.txt && \
+    uv pip install --system --no-cache -r /tmp/requirements.txt
 
 WORKDIR /app
 

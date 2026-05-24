@@ -47,7 +47,8 @@ jobs:
         # production, not a freshly-resolved set of transitive dependencies.
         run: |
           uv pip install --system --upgrade 'pip>=26.1'
-          uv pip install --system --frozen -r <(uv export --frozen --extra security --extra test)
+          uv export --frozen --extra security --extra test -o /tmp/requirements.txt
+          uv pip install --system -r /tmp/requirements.txt
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/
