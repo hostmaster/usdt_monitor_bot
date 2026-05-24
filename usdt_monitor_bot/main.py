@@ -134,6 +134,8 @@ async def main() -> None:
         next_run_time=datetime.now(),
         id="usdt_check_job",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     scheduler.start()
 

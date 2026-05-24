@@ -126,13 +126,20 @@ def mock_bot() -> AsyncMock:
 @pytest.fixture
 def mock_db_manager() -> AsyncMock:
     """Provides a mocked DatabaseManager."""
-    return AsyncMock(spec=DatabaseManager)
+    db = AsyncMock(spec=DatabaseManager)
+    # Defaults for batch spam-enrichment paths (avoid unawaited AsyncMock coroutines).
+    db.get_recent_transactions.return_value = []
+    db.get_known_senders.return_value = set()
+    return db
 
 
 @pytest.fixture
 def mock_etherscan_client() -> AsyncMock:
     """Provides a mocked EtherscanClient."""
-    return AsyncMock(spec=EtherscanClient)
+    client = AsyncMock(spec=EtherscanClient)
+    client.get_contract_creation_blocks.return_value = {}
+    client.get_contract_creation_block.return_value = None
+    return client
 
 
 @pytest.fixture

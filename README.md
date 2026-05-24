@@ -34,9 +34,10 @@ A Telegram bot that monitors Ethereum addresses for incoming USDT (Tether) and U
 
 - `/start` - Start interaction with the bot
 - `/help` - Show available commands
-- `/add <eth_address>` - Add an Ethereum address to monitor for incoming USDT
+- `/add <eth_address>` - Add an Ethereum address to monitor for USDT/USDC transfers
 - `/list` - List all addresses you're currently monitoring
 - `/remove <eth_address>` - Stop monitoring a specific address
+- `/spam` - View a report of suppressed spam/dust transactions
 
 ## How It Works
 
@@ -75,7 +76,7 @@ usdt_monitor_bot/
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.14+
 - Docker and Docker Compose (for containerized deployment)
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Etherscan API Key (from [Etherscan](https://etherscan.io/apis))

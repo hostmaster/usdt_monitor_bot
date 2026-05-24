@@ -49,6 +49,20 @@ jobs:
       - name: Run Bandit
         run: |
           bandit --baseline baseline.json -r usdt_monitor_bot/
+      - name: Verify Bandit baseline is current
+        run: |
+          bandit -r usdt_monitor_bot/ -f json -o /tmp/bandit-fresh.json -q
+          python -c "
+          import json, sys
+          with open('baseline.json') as f:
+              baseline = json.load(f)
+          with open('/tmp/bandit-fresh.json') as f:
+              fresh = json.load(f)
+          if baseline.get('errors') != fresh.get('errors'):
+              print('baseline.json is stale (errors differ); regenerate with:', file=sys.stderr)
+              print('  bandit -r usdt_monitor_bot/ -f json -o baseline.json', file=sys.stderr)
+              sys.exit(1)
+          "
       - name: Check dependencies for known vulnerabilities
         run: |
           pip-audit
