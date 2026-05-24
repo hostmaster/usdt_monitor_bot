@@ -163,14 +163,14 @@ class EtherscanClient:
         Returns:
             A configured TCPConnector instance.
         """
-        # Create connector with strict limits to prevent file descriptor exhaustion
-        # force_close=True closes connections after each request to prevent FD accumulation
+        # Create connector with strict limits to prevent file descriptor exhaustion.
+        # enable_cleanup_closed=True ensures half-closed connections are reaped promptly.
         # Note: enable_cleanup_closed is deprecated in Python 3.14+ (fixed in CPython)
         return TCPConnector(
             limit=self.MAX_TOTAL_CONNECTIONS,
             limit_per_host=self.MAX_CONNECTIONS_PER_HOST,
             ttl_dns_cache=self.DNS_CACHE_TTL_SECONDS,
-            force_close=True,
+            enable_cleanup_closed=True,
         )
 
     def _create_session(self) -> aiohttp.ClientSession:

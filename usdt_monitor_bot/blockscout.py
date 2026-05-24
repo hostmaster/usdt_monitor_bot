@@ -77,7 +77,7 @@ class BlockscoutClient:
             limit=self.MAX_TOTAL_CONNECTIONS,
             limit_per_host=self.MAX_CONNECTIONS_PER_HOST,
             ttl_dns_cache=self.DNS_CACHE_TTL_SECONDS,
-            force_close=True,
+            enable_cleanup_closed=True,
         )
         return aiohttp.ClientSession(timeout=self._timeout, connector=self._connector)
 
