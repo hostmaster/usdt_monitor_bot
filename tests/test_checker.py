@@ -961,6 +961,37 @@ async def test_notification_dedup_allows_send_when_new(
     mock_notifier.send_token_notification.assert_awaited_once()
 
 
+async def test_notification_dedup_rollback_on_send_failure(
+    checker: TransactionChecker,
+    mock_db_manager: AsyncMock,
+    mock_notifier: AsyncMock,
+):
+    """When Telegram send fails, the dedup mark is deleted so next cycle retries.
+
+    Without rollback, the DB entry would remain and the notification would be
+    permanently suppressed even though it was never delivered.
+    """
+    checker._spam_detection_enabled = False
+    mock_db_manager.get_recent_transactions.return_value = []
+    mock_db_manager.mark_notification_sent.return_value = True
+    mock_notifier.send_token_notification.side_effect = Exception("Telegram timeout")
+
+    tx = create_mock_tx(
+        BLOCK_ADDR1_START + 1, "0xsender", ADDR1, USDT_CONTRACT, tx_hash="0xfailed_tx"
+    )
+    tx["token_symbol"] = "USDT"
+
+    result = await checker._process_single_transaction(
+        tx, [USER1], ADDR1.lower(), []
+    )
+    # No successful send — count must be 0
+    assert result == 0
+    # The mark must have been set…
+    mock_db_manager.mark_notification_sent.assert_awaited_once_with(USER1, "0xfailed_tx")
+    # …and then rolled back so the next cycle can retry
+    mock_db_manager.delete_notification_sent.assert_awaited_once_with(USER1, "0xfailed_tx")
+
+
 # --- Tests for Contract Age Caching ---
 
 
@@ -1099,20 +1130,33 @@ async def test_db_is_notification_sent(memory_db_manager):
     assert await memory_db_manager.is_notification_sent(1, "0xtxhash") is True
 
 
+async def test_db_delete_notification_sent(memory_db_manager):
+    """delete_notification_sent removes the (user_id, tx_hash) entry so it can be re-inserted."""
+    await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    assert await memory_db_manager.is_notification_sent(1, "0xtxhash") is True
+
+    await memory_db_manager.delete_notification_sent(1, "0xtxhash")
+    assert await memory_db_manager.is_notification_sent(1, "0xtxhash") is False
+
+    # After deletion a fresh mark succeeds (returns True, not a duplicate)
+    result = await memory_db_manager.mark_notification_sent(1, "0xtxhash")
+    assert result is True
+
+
 async def test_db_cleanup_old_notifications(memory_db_manager):
     """cleanup_old_notifications removes entries older than the cutoff."""
     import sqlite3
 
-    # Insert a record with an old sent_at timestamp directly
+    # Insert a record with an old sent_at timestamp directly (ISO-8601 Z format)
     conn = sqlite3.connect(memory_db_manager.db_path)
     conn.execute(
         "INSERT INTO notification_sent (user_id, tx_hash, sent_at) VALUES (?, ?, ?)",
-        (1, "0xold", "2000-01-01T00:00:00"),
+        (1, "0xold", "2000-01-01T00:00:00Z"),
     )
     conn.commit()
     conn.close()
 
-    # Insert a fresh record via the normal path
+    # Insert a fresh record via the normal path (uses schema default with Z suffix)
     await memory_db_manager.mark_notification_sent(2, "0xrecent")
 
     deleted = await memory_db_manager.cleanup_old_notifications(days=90)
@@ -1120,6 +1164,26 @@ async def test_db_cleanup_old_notifications(memory_db_manager):
     # Recent record must survive
     assert await memory_db_manager.is_notification_sent(2, "0xrecent") is True
     assert await memory_db_manager.is_notification_sent(1, "0xold") is False
+
+
+async def test_db_notification_sent_at_format(memory_db_manager):
+    """sent_at column uses ISO-8601 with Z suffix, not space-separated SQLite datetime."""
+    import sqlite3
+
+    await memory_db_manager.mark_notification_sent(1, "0xhash")
+
+    conn = sqlite3.connect(memory_db_manager.db_path)
+    row = conn.execute(
+        "SELECT sent_at FROM notification_sent WHERE user_id = 1 AND tx_hash = '0xhash'"
+    ).fetchone()
+    conn.close()
+
+    assert row is not None
+    sent_at = row[0]
+    # Must be 'YYYY-MM-DDTHH:MM:SSZ' (T separator, Z suffix) not space-separated
+    assert "T" in sent_at, f"Expected T separator in sent_at, got: {sent_at!r}"
+    assert sent_at.endswith("Z"), f"Expected Z suffix in sent_at, got: {sent_at!r}"
+    assert " " not in sent_at, f"Unexpected space in sent_at, got: {sent_at!r}"
 
 
 # --- Unknown token early return ---

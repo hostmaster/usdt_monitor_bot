@@ -411,6 +411,8 @@ class TransactionChecker:
         # mark_notification_sent() atomically inserts (user_id, tx_hash) and
         # returns True on first insert, False if already recorded — combining
         # the check-and-set in a single DB roundtrip that survives restarts.
+        # If the Telegram send fails, delete_notification_sent() rolls back the
+        # mark so the next cycle retries rather than permanently suppressing it.
         sent_count = 0
         for user_id in user_ids:
             is_new = await self._db.mark_notification_sent(user_id, tx_hash)
@@ -422,10 +424,12 @@ class TransactionChecker:
                     user_id, tx, tx_token_symbol, address_lower, risk_analysis
                 )
                 sent_count += 1
-            except Exception:
+            except Exception as e:
+                # Roll back the dedup mark so the notification is retried next cycle.
+                await self._db.delete_notification_sent(user_id, tx_hash)
                 logging.warning(
                     f"Notification send failed user={user_id} tx={tx_hash[:16]}...; "
-                    "dedup entry retained — notification will not be retried next cycle",
+                    f"dedup mark rolled back, will retry next cycle: {e}",
                     exc_info=True,
                 )
         return sent_count
