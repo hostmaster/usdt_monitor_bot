@@ -130,6 +130,8 @@ def mock_db_manager() -> AsyncMock:
     # Defaults for batch spam-enrichment paths (avoid unawaited AsyncMock coroutines).
     db.get_recent_transactions.return_value = []
     db.get_known_senders.return_value = set()
+    # Default: every notification is treated as new (not a duplicate).
+    db.mark_notification_sent.return_value = True
     return db
 
 

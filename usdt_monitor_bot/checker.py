@@ -7,10 +7,9 @@ and performs spam detection analysis.
 
 # Standard library
 import asyncio
-import contextlib
 import logging
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from dataclasses import dataclass
 
 # Third-party
@@ -88,10 +87,6 @@ class TransactionChecker:
         # and on overflow we evict the least-recently-used entry.
         self._contract_creation_cache: OrderedDict[str, int | None] = OrderedDict()
         self._contract_creation_cache_max_size = config.contract_creation_cache_size
-        # Bounded in-memory cache of (user_id, tx_hash) to suppress duplicate notifications
-        self._notification_sent_cache: set[tuple[int, str]] = set()
-        self._notification_sent_order: deque[tuple[int, str]] = deque()
-        self._notification_dedup_max_size = config.notification_dedup_cache_size
         self._block_tracker = BlockTracker(etherscan_client)
         logging.debug("TransactionChecker initialized")
 
@@ -336,29 +331,6 @@ class TransactionChecker:
                 exc_info=True,
             )
 
-    def _add_notification_sent(self, user_id: int, tx_hash: str) -> None:
-        """Record (user_id, tx_hash) in the bounded dedup cache and evict oldest if over cap."""
-        if self._notification_dedup_max_size <= 0:
-            return  # Cache disabled when size is not positive
-        key = (user_id, tx_hash)
-        if key in self._notification_sent_cache:
-            return
-        while (
-            len(self._notification_sent_order) >= self._notification_dedup_max_size
-            and self._notification_sent_order
-        ):
-            old = self._notification_sent_order.popleft()
-            self._notification_sent_cache.discard(old)
-        self._notification_sent_cache.add(key)
-        self._notification_sent_order.append(key)
-
-    def _remove_notification_sent(self, user_id: int, tx_hash: str) -> None:
-        """Roll back a dedup cache entry — used when a notification send fails."""
-        key = (user_id, tx_hash)
-        self._notification_sent_cache.discard(key)
-        with contextlib.suppress(ValueError):
-            self._notification_sent_order.remove(key)
-
     async def _process_single_transaction(
         self,
         tx: dict,
@@ -435,22 +407,31 @@ class TransactionChecker:
             logging.debug(f"Suppressing notification for spam tx={tx_hash[:16]}...")
             return 0
 
-        # Send notifications for legitimate transactions only (skip if already sent recently when cache enabled)
-        # Register in dedup cache BEFORE the await to close the window between check and send;
-        # roll back on failure so the next cycle can retry.
+        # Send notifications for legitimate transactions only.
+        # mark_notification_sent() atomically inserts (user_id, tx_hash) and
+        # returns True on first insert, False if already recorded — combining
+        # the check-and-set in a single DB roundtrip that survives restarts.
+        # If the Telegram send fails, delete_notification_sent() rolls back the
+        # mark so the next cycle retries rather than permanently suppressing it.
         sent_count = 0
         for user_id in user_ids:
-            if self._notification_dedup_max_size > 0 and (user_id, tx_hash) in self._notification_sent_cache:
+            is_new = await self._db.mark_notification_sent(user_id, tx_hash)
+            if not is_new:
                 logging.debug(f"Skip duplicate notify user={user_id} tx={tx_hash[:16]}...")
                 continue
-            self._add_notification_sent(user_id, tx_hash)
             try:
                 await self._notifier.send_token_notification(
                     user_id, tx, tx_token_symbol, address_lower, risk_analysis
                 )
                 sent_count += 1
-            except Exception:
-                self._remove_notification_sent(user_id, tx_hash)
+            except Exception as e:
+                # Roll back the dedup mark so the notification is retried next cycle.
+                await self._db.delete_notification_sent(user_id, tx_hash)
+                logging.warning(
+                    f"Notification send failed user={user_id} tx={tx_hash[:16]}...; "
+                    f"dedup mark rolled back, will retry next cycle: {e}",
+                    exc_info=True,
+                )
         return sent_count
 
     async def _prefetch_enrichment_context(

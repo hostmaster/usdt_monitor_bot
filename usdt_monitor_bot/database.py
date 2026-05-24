@@ -219,6 +219,22 @@ class DatabaseManager:
             # on every checker cycle x monitored address.
             """CREATE INDEX IF NOT EXISTS idx_wallets_address
                    ON wallets(address)""",
+
+            # Persistent notification deduplication: survives restarts and scales
+            # correctly with large user counts. PRIMARY KEY provides atomic
+            # INSERT-or-ignore semantics without a separate SELECT check.
+            # strftime stores ISO-8601 with Z suffix (e.g. 2024-01-01T12:00:00Z)
+            # so string comparisons in cleanup_old_notifications are correct.
+            """CREATE TABLE IF NOT EXISTS notification_sent (
+                   user_id INTEGER NOT NULL,
+                   tx_hash TEXT NOT NULL,
+                   sent_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                   PRIMARY KEY (user_id, tx_hash)
+               ) STRICT""",
+            # Speeds up cleanup_old_notifications which filters by sent_at.
+            # Without this index the DELETE scans the entire table every cleanup cycle.
+            """CREATE INDEX IF NOT EXISTS idx_notification_sent_at
+                   ON notification_sent(sent_at)""",
         ]
         success = True
         for query in queries:
@@ -647,6 +663,78 @@ class DatabaseManager:
         """
         return await self._run_sync_db_operation(
             self._get_known_senders_sync, monitored_address, sender_addresses
+        )
+
+    # --- Notification Deduplication Operations ---
+    def _mark_notification_sent_sync(self, user_id: int, tx_hash: str) -> bool:
+        """Insert (user_id, tx_hash). Returns True if newly inserted, False if duplicate."""
+        rowcount = self._execute_db_query(
+            "INSERT OR IGNORE INTO notification_sent (user_id, tx_hash) VALUES (?, ?)",
+            (user_id, tx_hash),
+            commit=True,
+        )
+        return rowcount > 0
+
+    def _delete_notification_sent_sync(self, user_id: int, tx_hash: str) -> None:
+        """Delete a (user_id, tx_hash) dedup entry. Used to roll back a mark on send failure."""
+        self._execute_db_query(
+            "DELETE FROM notification_sent WHERE user_id = ? AND tx_hash = ?",
+            (user_id, tx_hash),
+            commit=True,
+        )
+
+    def _is_notification_sent_sync(self, user_id: int, tx_hash: str) -> bool:
+        """Return True if this notification was already sent."""
+        result = self._execute_db_query(
+            "SELECT 1 FROM notification_sent WHERE user_id = ? AND tx_hash = ? LIMIT 1",
+            (user_id, tx_hash),
+            fetch_one=True,
+        )
+        return result is not None
+
+    def _cleanup_old_notifications_sync(self, days: int = 90) -> int:
+        """Delete entries older than `days` days. Returns count deleted."""
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        # Use the same format as the schema default (strftime '%Y-%m-%dT%H:%M:%SZ')
+        # so string comparisons work correctly. datetime.isoformat() produces
+        # '2024-01-01T12:00:00+00:00' whose '+' sorts AFTER 'Z' (0x2B > 0x5A is
+        # False, but '+00:00' vs 'Z' differs in length and prefix), causing
+        # mismatches. strftime with 'Z' matches stored values exactly.
+        cutoff_str = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
+        rowcount = self._execute_db_query(
+            "DELETE FROM notification_sent WHERE sent_at < ?",
+            (cutoff_str,),
+            commit=True,
+        )
+        return rowcount if rowcount and rowcount > 0 else 0
+
+    async def mark_notification_sent(self, user_id: int, tx_hash: str) -> bool:
+        """Insert (user_id, tx_hash). Returns True if newly inserted, False if duplicate."""
+        return await self._run_sync_db_operation(
+            self._mark_notification_sent_sync, user_id, tx_hash
+        )
+
+    async def delete_notification_sent(self, user_id: int, tx_hash: str) -> None:
+        """Delete (user_id, tx_hash) dedup entry.
+
+        Called to roll back a mark when the actual Telegram send fails, so the
+        notification is retried on the next checker cycle instead of being
+        permanently suppressed.
+        """
+        await self._run_sync_db_operation(
+            self._delete_notification_sent_sync, user_id, tx_hash
+        )
+
+    async def is_notification_sent(self, user_id: int, tx_hash: str) -> bool:
+        """Return True if this notification was already sent."""
+        return await self._run_sync_db_operation(
+            self._is_notification_sent_sync, user_id, tx_hash
+        )
+
+    async def cleanup_old_notifications(self, days: int = 90) -> int:
+        """Delete entries older than `days` days. Returns count deleted."""
+        return await self._run_sync_db_operation(
+            self._cleanup_old_notifications_sync, days
         )
 
     # --- Spam Transaction Operations ---

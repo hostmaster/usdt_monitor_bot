@@ -57,7 +57,6 @@ class BotConfig:
         max_transactions_per_check: int = 10,  # Only report last 10 transactions per check
         verbose_logging: bool = False,  # Enable DEBUG level logging
         spam_detection_debug: bool = False,  # Enable detailed spam bypass debugging
-        notification_dedup_cache_size: int = 10_000,  # Max (user_id, tx_hash) to remember to suppress duplicate notifications
         contract_creation_cache_size: int = 1_000,  # Max contract addresses to cache creation blocks for
         spam_detector_config: dict | None = None,  # Overrides for SpamDetector thresholds; None means use SpamDetector defaults
         bot_session_connection_limit: int = 10,  # Max concurrent aiohttp connections to Telegram
@@ -105,9 +104,6 @@ class BotConfig:
         # Logging settings
         self.verbose_logging = verbose_logging
         self.spam_detection_debug = spam_detection_debug
-
-        # Notification deduplication (in-memory cache cap)
-        self.notification_dedup_cache_size = notification_dedup_cache_size
 
         # Contract creation block cache cap
         self.contract_creation_cache_size = contract_creation_cache_size
@@ -244,11 +240,6 @@ def load_config() -> BotConfig:
     verbose_env = os.getenv("VERBOSE", "").lower()
     verbose_logging = verbose_env in ("true", "1", "yes", "on")
 
-    # Notification deduplication cache size (in-memory)
-    notification_dedup_cache_size = _get_env_int(
-        "NOTIFICATION_DEDUP_CACHE_SIZE", 10_000
-    )
-
     # Contract creation block cache size (in-memory)
     contract_creation_cache_size = _get_env_int("CONTRACT_CREATION_CACHE_SIZE", 1_000)
 
@@ -334,7 +325,6 @@ def load_config() -> BotConfig:
         max_transactions_per_check=max_transactions_per_check,
         verbose_logging=verbose_logging,
         spam_detection_debug=spam_detection_debug,
-        notification_dedup_cache_size=notification_dedup_cache_size,
         contract_creation_cache_size=contract_creation_cache_size,
         spam_detector_config=spam_detector_config or None,
         bot_session_connection_limit=bot_session_connection_limit,
