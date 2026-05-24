@@ -67,6 +67,8 @@ class BotConfig:
         moralis_api_key: str | None = None,
         fallback_failure_threshold: int = 3,
         fallback_cooldown_seconds: float = 300.0,
+        rate_limit_max_calls: int = 10,
+        rate_limit_window_seconds: float = 60.0,
     ):
         # Telegram Bot Token
         self.telegram_bot_token = telegram_bot_token
@@ -123,6 +125,10 @@ class BotConfig:
         self.moralis_api_key = moralis_api_key
         self.fallback_failure_threshold = fallback_failure_threshold
         self.fallback_cooldown_seconds = fallback_cooldown_seconds
+
+        # Per-user Telegram command rate limiting
+        self.rate_limit_max_calls = rate_limit_max_calls
+        self.rate_limit_window_seconds = rate_limit_window_seconds
 
         # Initialize token registry
         self.token_registry = TokenRegistry()
@@ -260,6 +266,10 @@ def load_config() -> BotConfig:
     fallback_failure_threshold = _get_env_int("FALLBACK_FAILURE_THRESHOLD", 3)
     fallback_cooldown_seconds = _get_env_float("FALLBACK_COOLDOWN_SECONDS", 300.0)
 
+    # Per-user Telegram command rate limiting
+    rate_limit_max_calls = _get_env_int("RATE_LIMIT_MAX_CALLS", 10)
+    rate_limit_window_seconds = _get_env_float("RATE_LIMIT_WINDOW_SECONDS", 60.0)
+
     # Spam detection debugging option
     spam_debug_env = os.getenv("SPAM_DETECTION_DEBUG", "").lower()
     spam_detection_debug = spam_debug_env in ("true", "1", "yes", "on")
@@ -334,6 +344,8 @@ def load_config() -> BotConfig:
         moralis_api_key=moralis_api_key,
         fallback_failure_threshold=fallback_failure_threshold,
         fallback_cooldown_seconds=fallback_cooldown_seconds,
+        rate_limit_max_calls=rate_limit_max_calls,
+        rate_limit_window_seconds=rate_limit_window_seconds,
     )
 
     # Token configuration overrides

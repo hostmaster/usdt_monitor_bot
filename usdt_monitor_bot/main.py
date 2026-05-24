@@ -27,6 +27,7 @@ from usdt_monitor_bot.config import load_config
 from usdt_monitor_bot.database import DatabaseManager
 from usdt_monitor_bot.etherscan import EtherscanClient
 from usdt_monitor_bot.handlers import register_handlers
+from usdt_monitor_bot.middleware import UserRateLimitMiddleware
 from usdt_monitor_bot.moralis import MoralisClient
 from usdt_monitor_bot.notifier import NotificationService
 from usdt_monitor_bot.spam_detector import SpamDetector, enable_spam_detector_debugging
@@ -94,7 +95,16 @@ async def main() -> None:
         session=bot_session,
     )
     dp = Dispatcher(db_manager=db_manager)
-    logging.debug(f"Bot initialized with session limit={config.bot_session_connection_limit}")
+    dp.message.middleware(
+        UserRateLimitMiddleware(
+            max_calls=config.rate_limit_max_calls,
+            window_seconds=config.rate_limit_window_seconds,
+        )
+    )
+    logging.debug(
+        f"Bot initialized with session limit={config.bot_session_connection_limit}, "
+        f"rate_limit={config.rate_limit_max_calls} calls/{config.rate_limit_window_seconds}s"
+    )
 
     # 8. Initialize Services
     etherscan_client = EtherscanClient(config=config)
