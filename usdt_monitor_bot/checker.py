@@ -723,110 +723,131 @@ class TransactionChecker:
     async def _process_single_address(
         self,
         address_lower: str,
-        stats: dict,
-        update_tasks: list,
         latest_block: int | None,
-    ) -> None:
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[dict, list]:
         """
-        Process a single address: fetch, analyze, and update block number.
+        Process a single address: fetch, analyze, and determine block update.
+
+        Runs under the provided semaphore to bound concurrent address fetches.
+        Returns a (stats_delta, update_tasks) tuple so the caller can merge
+        results from concurrent executions without shared mutable state.
 
         Args:
             address_lower: The address to process (lowercase)
-            stats: Dictionary to update with statistics
-            update_tasks: List to append block update tasks
             latest_block: Latest chain block for the current cycle (shared
                 across all addresses in one cycle), or None if unavailable.
+            semaphore: Bounds the number of addresses processed concurrently.
+
+        Returns:
+            Tuple of (local_stats, local_update_tasks) where local_stats is a
+            dict with the same keys as the cycle-level stats dict and
+            local_update_tasks is a list of DB coroutines to run after all
+            addresses have been processed.
         """
-        try:
-            start_block = await self._db.get_last_checked_block(address_lower)
+        local_stats = {
+            "total_transactions_found": 0,
+            "total_transactions_processed": 0,
+            "addresses_with_transactions": 0,
+            "addresses_updated": 0,
+            "errors_count": 0,
+            "warnings_count": 0,
+        }
+        local_update_tasks: list = []
 
-            logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
+        async with semaphore:
+            try:
+                start_block = await self._db.get_last_checked_block(address_lower)
 
-            if latest_block is None:
-                logging.debug(
-                    f"No latest block for {address_lower[:8]}..., proceeding without cap"
-                )
+                logging.debug(f"Check {address_lower[:8]}... from block {start_block + 1}")
 
-            raw_transactions, all_tokens_ok = await self._fetch_transactions_for_address(
-                address_lower, start_block + 1
-            )
-
-            stats["total_transactions_found"] += len(raw_transactions)
-            if raw_transactions:
-                stats["addresses_with_transactions"] += 1
-
-            result = await self._process_address_transactions(
-                address_lower, raw_transactions, start_block, latest_block
-            )
-            new_last_block = result.new_last_block
-            processed_count = result.processed_count
-            max_block_in_processed_batch = result.max_block_in_processed_batch
-            stats["total_transactions_processed"] += processed_count
-
-            # If any per-token fetch failed, do NOT advance the block checkpoint.
-            # Advancing would permanently skip the failing token's transactions
-            # in the queried block range on subsequent cycles. Persist processed
-            # txs (already stored by _process_address_transactions) and retry
-            # the same block range next cycle.
-            if not all_tokens_ok:
-                logging.warning(
-                    f"Partial fetch for {address_lower[:8]}...: at least one token "
-                    f"errored; not advancing block checkpoint (will retry next cycle)"
-                )
-                stats["warnings_count"] += 1
-                return
-
-            # Determine next block and update if needed
-            block_result = await self._block_tracker.determine_next_block(
-                start_block,
-                new_last_block,
-                raw_transactions,
-                address_lower,
-                latest_block,
-            )
-
-            if self._should_update_block(start_block, block_result):
                 if latest_block is None:
+                    logging.debug(
+                        f"No latest block for {address_lower[:8]}..., proceeding without cap"
+                    )
+
+                raw_transactions, all_tokens_ok = await self._fetch_transactions_for_address(
+                    address_lower, start_block + 1
+                )
+
+                local_stats["total_transactions_found"] += len(raw_transactions)
+                if raw_transactions:
+                    local_stats["addresses_with_transactions"] += 1
+
+                result = await self._process_address_transactions(
+                    address_lower, raw_transactions, start_block, latest_block
+                )
+                new_last_block = result.new_last_block
+                processed_count = result.processed_count
+                max_block_in_processed_batch = result.max_block_in_processed_batch
+                local_stats["total_transactions_processed"] += processed_count
+
+                # If any per-token fetch failed, do NOT advance the block checkpoint.
+                # Advancing would permanently skip the failing token's transactions
+                # in the queried block range on subsequent cycles. Persist processed
+                # txs (already stored by _process_address_transactions) and retry
+                # the same block range next cycle.
+                if not all_tokens_ok:
                     logging.warning(
-                        f"Defensive block cap skipped for {address_lower[:8]}...: "
-                        f"could not fetch latest block, persisting uncapped {block_result.final_block_number}"
+                        f"Partial fetch for {address_lower[:8]}...: at least one token "
+                        f"errored; not advancing block checkpoint (will retry next cycle)"
                     )
-                final_block_to_update = self._block_tracker.cap_block_to_latest(
-                    block_result.final_block_number,
-                    latest_block,
+                    local_stats["warnings_count"] += 1
+                    return local_stats, local_update_tasks
+
+                # Determine next block and update if needed
+                block_result = await self._block_tracker.determine_next_block(
+                    start_block,
+                    new_last_block,
+                    raw_transactions,
                     address_lower,
-                    context="defensive check before database update",
-                    log_level="warning",
+                    latest_block,
                 )
-                # Never persist a block lower than the highest we already processed, or we will
-                # re-fetch and re-notify the same transactions next cycle (e.g. when API returns
-                # txs in blocks ahead of reported "latest" block)
-                if max_block_in_processed_batch > 0:
-                    final_block_to_update = max(
-                        final_block_to_update, max_block_in_processed_batch
-                    )
 
-                self._log_block_update(
-                    address_lower, start_block, block_result, final_block_to_update
-                )
-                update_tasks.append(
-                    self._db.update_last_checked_block(
-                        address_lower, final_block_to_update
+                if self._should_update_block(start_block, block_result):
+                    if latest_block is None:
+                        logging.warning(
+                            f"Defensive block cap skipped for {address_lower[:8]}...: "
+                            f"could not fetch latest block, persisting uncapped {block_result.final_block_number}"
+                        )
+                    final_block_to_update = self._block_tracker.cap_block_to_latest(
+                        block_result.final_block_number,
+                        latest_block,
+                        address_lower,
+                        context="defensive check before database update",
+                        log_level="warning",
                     )
-                )
-                stats["addresses_updated"] += 1
+                    # Never persist a block lower than the highest we already processed, or we will
+                    # re-fetch and re-notify the same transactions next cycle (e.g. when API returns
+                    # txs in blocks ahead of reported "latest" block)
+                    if max_block_in_processed_batch > 0:
+                        final_block_to_update = max(
+                            final_block_to_update, max_block_in_processed_batch
+                        )
 
-        except EtherscanRateLimitError:
-            logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
-            stats["warnings_count"] += 1
-        except (TimeoutError, aiohttp.ClientError) as e:
-            logging.error(f"Network error {address_lower[:8]}...: {e}")
-            stats["errors_count"] += 1
-        except Exception as e:
-            logging.error(
-                f"Error processing {address_lower[:8]}...: {e}", exc_info=True
-            )
-            stats["errors_count"] += 1
+                    self._log_block_update(
+                        address_lower, start_block, block_result, final_block_to_update
+                    )
+                    local_update_tasks.append(
+                        self._db.update_last_checked_block(
+                            address_lower, final_block_to_update
+                        )
+                    )
+                    local_stats["addresses_updated"] += 1
+
+            except EtherscanRateLimitError:
+                logging.warning(f"Rate limit: {address_lower[:8]}..., skip cycle")
+                local_stats["warnings_count"] += 1
+            except (TimeoutError, aiohttp.ClientError) as e:
+                logging.error(f"Network error {address_lower[:8]}...: {e}")
+                local_stats["errors_count"] += 1
+            except Exception as e:
+                logging.error(
+                    f"Error processing {address_lower[:8]}...: {e}", exc_info=True
+                )
+                local_stats["errors_count"] += 1
+
+        return local_stats, local_update_tasks
 
     async def check_all_addresses(self) -> None:
         """
@@ -853,8 +874,6 @@ class TransactionChecker:
             "errors_count": 0,
             "warnings_count": 0,
         }
-        update_tasks = []
-
         # Fetch latest_block once per cycle and reuse for every address.
         # This saves N-1 API calls per cycle (N = number of monitored addresses)
         # since the latest chain block is the same for all of them.
@@ -862,10 +881,25 @@ class TransactionChecker:
         if latest_block is None:
             logging.debug("No latest block for this cycle, proceeding without cap")
 
-        for address in addresses_to_check:
-            await self._process_single_address(
-                address.lower(), stats, update_tasks, latest_block
-            )
+        semaphore = asyncio.Semaphore(8)  # bound concurrent address fetches
+        results = await asyncio.gather(
+            *[
+                self._process_single_address(addr.lower(), latest_block, semaphore)
+                for addr in addresses_to_check
+            ],
+            return_exceptions=True,
+        )
+
+        update_tasks = []
+        for result in results:
+            if isinstance(result, Exception):
+                logging.warning(f"Address processing error: {result}")
+                stats["errors_count"] += 1
+                continue
+            local_stats, local_tasks = result
+            for key, value in local_stats.items():
+                stats[key] += value
+            update_tasks.extend(local_tasks)
 
         if update_tasks:
             logging.debug(f"Updating blocks for {len(update_tasks)} addresses")
