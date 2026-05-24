@@ -16,7 +16,8 @@ COPY usdt_monitor_bot/ usdt_monitor_bot/
 # This cache persists across builds in CI/CD, significantly speeding up dependency installation
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv export --frozen --no-dev -o /tmp/requirements.txt && \
-    uv pip install --system --no-cache -r /tmp/requirements.txt
+    uv pip install --system --no-cache -r /tmp/requirements.txt && \
+    uv pip install --system --no-cache --no-deps .
 
 WORKDIR /app
 
