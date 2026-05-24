@@ -38,6 +38,15 @@ from usdt_monitor_bot.transaction_parser import (
     format_transaction_log,
 )
 
+_STATS_KEYS = (
+    "total_transactions_found",
+    "total_transactions_processed",
+    "addresses_with_transactions",
+    "addresses_updated",
+    "errors_count",
+    "warnings_count",
+)
+
 
 @dataclass
 class AddressProcessingResult:
@@ -745,14 +754,7 @@ class TransactionChecker:
             local_update_tasks is a list of DB coroutines to run after all
             addresses have been processed.
         """
-        local_stats = {
-            "total_transactions_found": 0,
-            "total_transactions_processed": 0,
-            "addresses_with_transactions": 0,
-            "addresses_updated": 0,
-            "errors_count": 0,
-            "warnings_count": 0,
-        }
+        local_stats = {k: 0 for k in _STATS_KEYS}
         local_update_tasks: list = []
 
         async with semaphore:
@@ -866,14 +868,7 @@ class TransactionChecker:
 
         logging.debug(f"Checking {len(addresses_to_check)} addresses")
 
-        stats = {
-            "total_transactions_found": 0,
-            "total_transactions_processed": 0,
-            "addresses_with_transactions": 0,
-            "addresses_updated": 0,
-            "errors_count": 0,
-            "warnings_count": 0,
-        }
+        stats = {k: 0 for k in _STATS_KEYS}
         # Fetch latest_block once per cycle and reuse for every address.
         # This saves N-1 API calls per cycle (N = number of monitored addresses)
         # since the latest chain block is the same for all of them.
@@ -892,7 +887,7 @@ class TransactionChecker:
 
         update_tasks = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logging.warning(f"Address processing error: {result}")
                 stats["errors_count"] += 1
                 continue
