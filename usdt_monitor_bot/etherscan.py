@@ -79,40 +79,43 @@ class AdaptiveRateLimiter:
         self._recovery_cooldown = recovery_cooldown
         self._consecutive_successes = 0
         self._last_rate_limit_time = 0.0
+        self._lock = asyncio.Lock()
 
     async def wait(self) -> None:
         """Wait for the current delay period before making a request."""
         await asyncio.sleep(self._current_delay)
 
-    def on_rate_limit(self) -> None:
+    async def on_rate_limit(self) -> None:
         """Called when a rate limit error is encountered. Increases delay."""
-        self._current_delay = min(
-            self._current_delay * self._backoff_factor, self._max_delay
-        )
-        self._consecutive_successes = 0
-        self._last_rate_limit_time = time.monotonic()
-        logging.info(f"Rate limit hit, delay={self._current_delay:.2f}s")
-
-    def on_success(self) -> None:
-        """Called when a request succeeds. Gradually reduces delay if stable."""
-        self._consecutive_successes += 1
-
-        # Only reduce delay after a threshold of consecutive successes
-        # and if enough time has passed since last rate limit
-        time_since_rate_limit = time.monotonic() - self._last_rate_limit_time
-        if (
-            self._consecutive_successes >= self._success_threshold
-            and time_since_rate_limit > self._recovery_cooldown
-        ):
-            new_delay = max(
-                self._current_delay * self._recovery_factor, self._min_delay
+        async with self._lock:
+            self._current_delay = min(
+                self._current_delay * self._backoff_factor, self._max_delay
             )
-            if new_delay < self._current_delay:
-                logging.debug(
-                    f"Delay reduced: {self._current_delay:.2f}s->{new_delay:.2f}s"
+            self._consecutive_successes = 0
+            self._last_rate_limit_time = time.monotonic()
+            logging.info(f"Rate limit hit, delay={self._current_delay:.2f}s")
+
+    async def on_success(self) -> None:
+        """Called when a request succeeds. Gradually reduces delay if stable."""
+        async with self._lock:
+            self._consecutive_successes += 1
+
+            # Only reduce delay after a threshold of consecutive successes
+            # and if enough time has passed since last rate limit
+            time_since_rate_limit = time.monotonic() - self._last_rate_limit_time
+            if (
+                self._consecutive_successes >= self._success_threshold
+                and time_since_rate_limit > self._recovery_cooldown
+            ):
+                new_delay = max(
+                    self._current_delay * self._recovery_factor, self._min_delay
                 )
-                self._current_delay = new_delay
-                self._consecutive_successes = 0
+                if new_delay < self._current_delay:
+                    logging.debug(
+                        f"Delay reduced: {self._current_delay:.2f}s->{new_delay:.2f}s"
+                    )
+                    self._current_delay = new_delay
+                    self._consecutive_successes = 0
 
     @property
     def current_delay(self) -> float:
@@ -308,11 +311,11 @@ class EtherscanClient:
         try:
             result = await request_func()
             # Mark success - rate limiter will gradually reduce delay
-            self._rate_limiter.on_success()
+            await self._rate_limiter.on_success()
             return result
         except EtherscanRateLimitError:
             # Adapt rate limiter when rate limit error is encountered
-            self._rate_limiter.on_rate_limit()
+            await self._rate_limiter.on_rate_limit()
             raise
 
     # Etherscan free tier caps at 1,000 records per request (effective July 1, 2026,

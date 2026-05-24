@@ -482,52 +482,52 @@ async def test_client_session_cleanup(mock_config, mock_aiohttp_session, monkeyp
 # --- AdaptiveRateLimiter ---
 
 
-def test_rate_limiter_on_rate_limit_increases_delay():
+async def test_rate_limiter_on_rate_limit_increases_delay():
     limiter = AdaptiveRateLimiter(initial_delay=1.0, max_delay=10.0, backoff_factor=2.0)
-    limiter.on_rate_limit()
+    await limiter.on_rate_limit()
     assert limiter.current_delay == 2.0
 
 
-def test_rate_limiter_on_rate_limit_caps_at_max():
+async def test_rate_limiter_on_rate_limit_caps_at_max():
     limiter = AdaptiveRateLimiter(initial_delay=8.0, max_delay=10.0, backoff_factor=2.0)
-    limiter.on_rate_limit()
+    await limiter.on_rate_limit()
     assert limiter.current_delay == 10.0
 
 
-def test_rate_limiter_on_rate_limit_resets_consecutive_successes():
+async def test_rate_limiter_on_rate_limit_resets_consecutive_successes():
     """on_rate_limit always resets the consecutive-success counter to zero."""
     # Use a very long cooldown so on_success never reduces delay (counter won't auto-reset)
     limiter = AdaptiveRateLimiter(
         initial_delay=1.0, success_threshold=5, recovery_cooldown=9999.0
     )
-    limiter.on_rate_limit()  # Set _last_rate_limit_time to now
+    await limiter.on_rate_limit()  # Set _last_rate_limit_time to now
     for _ in range(3):
-        limiter.on_success()
+        await limiter.on_success()
     assert limiter._consecutive_successes == 3
-    limiter.on_rate_limit()
+    await limiter.on_rate_limit()
     assert limiter._consecutive_successes == 0
 
 
-def test_rate_limiter_on_success_increments_counter():
+async def test_rate_limiter_on_success_increments_counter():
     limiter = AdaptiveRateLimiter(initial_delay=1.0)
-    limiter.on_success()
+    await limiter.on_success()
     assert limiter._consecutive_successes == 1
-    limiter.on_success()
+    await limiter.on_success()
     assert limiter._consecutive_successes == 2
 
 
-def test_rate_limiter_on_success_does_not_reduce_below_threshold():
+async def test_rate_limiter_on_success_does_not_reduce_below_threshold():
     """Delay should NOT reduce before success_threshold is reached."""
     limiter = AdaptiveRateLimiter(
         initial_delay=1.0, min_delay=0.1, success_threshold=10, recovery_cooldown=0.0
     )
     initial = limiter.current_delay
     for _ in range(9):  # One less than threshold
-        limiter.on_success()
+        await limiter.on_success()
     assert limiter.current_delay == initial
 
 
-def test_rate_limiter_on_success_reduces_delay_after_threshold_and_cooldown():
+async def test_rate_limiter_on_success_reduces_delay_after_threshold_and_cooldown():
     """Delay reduces after threshold successes with no cooldown restriction."""
     limiter = AdaptiveRateLimiter(
         initial_delay=2.0, min_delay=0.1, recovery_factor=0.5,
@@ -535,31 +535,31 @@ def test_rate_limiter_on_success_reduces_delay_after_threshold_and_cooldown():
     )
     # Ensure _last_rate_limit_time is in the past (it starts at 0.0)
     for _ in range(3):
-        limiter.on_success()
+        await limiter.on_success()
     assert limiter.current_delay < 2.0
 
 
-def test_rate_limiter_does_not_reduce_during_cooldown():
+async def test_rate_limiter_does_not_reduce_during_cooldown():
     """Delay should NOT reduce if still within cooldown window after rate limit."""
     limiter = AdaptiveRateLimiter(
         initial_delay=2.0, min_delay=0.1, recovery_factor=0.5,
         success_threshold=3, recovery_cooldown=9999.0,  # Very long cooldown
     )
-    limiter.on_rate_limit()  # Records _last_rate_limit_time = now
+    await limiter.on_rate_limit()  # Records _last_rate_limit_time = now
     initial_after_backoff = limiter.current_delay
     for _ in range(5):
-        limiter.on_success()
+        await limiter.on_success()
     assert limiter.current_delay == initial_after_backoff
 
 
-def test_rate_limiter_does_not_reduce_below_min_delay():
+async def test_rate_limiter_does_not_reduce_below_min_delay():
     """Delay must never drop below min_delay."""
     limiter = AdaptiveRateLimiter(
         initial_delay=0.11, min_delay=0.1, recovery_factor=0.5,
         success_threshold=3, recovery_cooldown=0.0,
     )
     for _ in range(20):
-        limiter.on_success()
+        await limiter.on_success()
     assert limiter.current_delay >= 0.1
 
 
