@@ -68,9 +68,4 @@ jobs:
           "
       - name: Check dependencies for known vulnerabilities
         run: |
-          # CVE-2026-34993 and CVE-2026-47265 require aiohttp>=3.14.0, but
-          # aiogram==3.28.2 (latest) constrains aiohttp<3.14. Ignored until
-          # aiogram releases support for aiohttp 3.14.x.
-          pip-audit \
-            --ignore-vuln CVE-2026-34993 \
-            --ignore-vuln CVE-2026-47265
+          pip-audit .
