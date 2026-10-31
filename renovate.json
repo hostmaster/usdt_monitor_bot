@@ -26,10 +26,12 @@
       }
     },
     {
-      "enabled": false,
+      "description": "Stay on Python 3.14 (Dockerfile + setup-python); do not propose 3.15+",
       "matchPackageNames": [
+        "python",
         "/^python$/"
-      ]
+      ],
+      "allowedVersions": "/^3\\.14([.-]|$)/"
     },
     {
       "groupName": "type definitions",
