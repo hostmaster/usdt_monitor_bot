@@ -21,12 +21,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 WORKDIR /app
 
-RUN addgroup --system appgroup && \
-    adduser --system --ingroup appgroup appuser && \
+RUN addgroup --system --gid 10001 appgroup && \
+    adduser --system --uid 10001 --ingroup appgroup appuser && \
     mkdir -p /app/data && \
-    chown appuser:appgroup /app /app/data && \
+    chown 10001:10001 /app /app/data && \
     chmod 755 /app /app/data
-USER appuser
+# Numeric UID satisfies hadolint DL3066 (name may not resolve on host)
+USER 10001
 
 # Explicitly set stop signal (SIGTERM is default, but being explicit is good practice)
 STOPSIGNAL SIGTERM
