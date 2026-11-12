@@ -42,7 +42,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1",
+    "pytest-asyncio==1.4.1.post1",
     "pytest-mock==3.17.0",
     "pytest-xdist==3.8.0",  # Parallel test execution
 ]
